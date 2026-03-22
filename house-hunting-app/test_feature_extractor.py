@@ -12,21 +12,12 @@ Usage:
     python test_feature_extractor.py
 """
 
-import os
 import sys
-import argparse
 import json
 
-# ── Resolve API key ──────────────────────────────────────────────────────────
-parser = argparse.ArgumentParser()
-parser.add_argument("--api-key", default=os.getenv("GEMINI_API_KEY"), help="Gemini API key")
-args = parser.parse_args()
-
-if not args.api_key:
-    print("❌  No API key found. Pass --api-key or set GEMINI_API_KEY env var.")
-    sys.exit(1)
-
 from feature_extractor import extract_features, format_requirements
+import streamlit as st
+api_key = st.secrets["GEMINI_API_KEY"]
 
 # ── Test cases ───────────────────────────────────────────────────────────────
 TEST_QUERIES = [
@@ -106,7 +97,7 @@ def run_tests():
 
         print(f"\n[{i}/{len(TEST_QUERIES)}] {query[:70]}...")
         try:
-            req = extract_features(query, args.api_key)
+            req = extract_features(query, api_key)
             failures = check(req, expect)
 
             if failures:
