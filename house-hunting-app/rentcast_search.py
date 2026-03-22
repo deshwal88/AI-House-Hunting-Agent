@@ -1,42 +1,137 @@
 import requests
 import streamlit as st
+from feature_extractor import RentalRequirements
+
 RENTCAST_API_KEY = st.secrets["RENTCAST_API_KEY"]
+ARCGIS_API_KEY   = st.secrets["ARCGIS_API_KEY"]
 RENTCAST_BASE_URL = "https://api.rentcast.io/v1"
+
+
+# ─────────────────────────────────────────────
+# 0. GEOCODE A LOCATION (ArcGIS API)
+# ─────────────────────────────────────────────
+def geocode_location(location: str) -> tuple[float, float] | None:
+    """
+    Converts a location string to (latitude, longitude) using ArcGIS Geocoding API.
+
+    Works for landmarks, addresses, universities, neighborhoods, etc.
+    e.g. "Rutgers University, NJ"  → (40.500, -74.447)
+         "downtown Austin TX"      → (30.267, -97.743)
+         "5th Street Austin TX"    → (30.269, -97.741)
+
+    Returns None if the location could not be geocoded.
+    """
+    url = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
+    params = {
+        "SingleLine": location,
+        "token":      ARCGIS_API_KEY,
+        "f":          "json",
+    }
+
+    response = requests.get(url, params=params)
+
+    if not response.ok:
+        print(f"  ⚠️  Geocoding error: {response.status_code} — {response.text}")
+        return None
+
+    candidates = response.json().get("candidates", [])
+
+    if not candidates:
+        print(f"  ⚠️  No geocoding results found for: {location}")
+        return None
+
+    location_data = candidates[0]["location"]
+    return location_data["y"], location_data["x"]  # latitude, longitude
+
 
 # ─────────────────────────────────────────────
 # 1. FETCH LISTINGS FROM RENTCAST (1 API call)
 # ─────────────────────────────────────────────
 def fetch_listings(features: dict) -> list:
     """
-    Fetches up to 100 ACTIVE rental listings from RentCast.
+    Fetches ACTIVE rental listings from RentCast.
 
-    We intentionally only pass area + budget to RentCast (broad filters),
-    and leave bedrooms, bathrooms, and property_type for local scoring.
+    Search strategy (in order of priority):
+    - street provided    → address + radius search (limit 100)
+    - near_location set  → ArcGIS geocode → lat/lng + radius search (limit 100)
+    - city/state only    → broad city-wide search (limit 500)
 
-    Why? RentCast's limit=100 returns the 100 most recently listed matches.
-    If we pass all filters, we might miss great properties listed slightly
-    earlier. By keeping filters broad, we get a more representative pool
-    for the local ranker to work with.
+    Broad filters strategy:
+    - Location, budget, square footage, lot size, and year built are passed
+      to RentCast to narrow the pool.
+    - Bedrooms, bathrooms, and property_type are intentionally NOT passed —
+      they are handled by the local scoring function for finer control.
     """
     params = {}
+    precise_search = False  # tracks whether street or near_location is used
 
-    # ── Location (required) ──────────────────────────────────
-    # Prefer zip_code if available, else city + state
-    if features.get("zip_code"):
-        params["zipCode"] = features["zip_code"]
+    # ── Location ─────────────────────────────────────────────
+    if features.get("street"):
+        # Street address provided → build full address + radius
+        address_parts = [features["street"]]
+        if features.get("city"):  address_parts.append(features["city"])
+        if features.get("state"): address_parts.append(features["state"])
+        if features.get("zip_code"): address_parts.append(features["zip_code"])
+
+        params["address"] = ", ".join(address_parts)
+        params["radius"]  = features.get("radius") or 3   # miles, default 3
+        precise_search    = True
+        print(f"  📍 Street search: {params['address']}, radius: {params['radius']} miles")
+
+    elif features.get("near_location"):
+        # Landmark/area provided → geocode to lat/lng + radius
+        print(f"  📍 Geocoding: {features['near_location']}")
+        coords = geocode_location(features["near_location"])
+
+        if coords:
+            params["latitude"]  = coords[0]
+            params["longitude"] = coords[1]
+            params["radius"]    = features.get("radius") or 3   # miles, default 3
+            precise_search      = True
+            print(f"  ✅ Geocoded to ({coords[0]:.4f}, {coords[1]:.4f}), radius: {params['radius']} miles")
+        else:
+            # Geocoding failed — fall back to city/state search
+            print(f"  ⚠️  Geocoding failed, falling back to city/state search")
+            if features.get("zip_code"):
+                params["zipCode"] = features["zip_code"]
+            else:
+                if features.get("city"):  params["city"]  = features["city"]
+                if features.get("state"): params["state"] = features["state"]
     else:
-        if features.get("city"):  params["city"]  = features["city"]
-        if features.get("state"): params["state"] = features["state"]
+        # No specific location → broad city/state search
+        if features.get("zip_code"):
+            params["zipCode"] = features["zip_code"]
+        else:
+            if features.get("city"):  params["city"]  = features["city"]
+            if features.get("state"): params["state"] = features["state"]
 
-    # ── Budget (passed to RentCast to avoid wildly irrelevant results) ──
+    # ── Budget ───────────────────────────────────────────────
     if features.get("budget")     is not None: params["maxPrice"] = features["budget"]
     if features.get("min_budget") is not None: params["minPrice"] = features["min_budget"]
 
-    # ── bedrooms, bathrooms, property_type are intentionally NOT passed ──
-    # They are handled by the local scoring function instead.
+    # ── Square Footage ───────────────────────────────────────
+    # RentCast range format: "800:" = at least 800, ":1200" = at most 1200
+    if features.get("square_footage") is not None:
+        op = features.get("square_footage_operator", "min")
+        params["squareFootage"] = f"{features['square_footage']}:" if op == "min" else f":{features['square_footage']}"
 
-    # Fetch 100 active listings — still just 1 API call
-    params["limit"]  = 100
+    # ── Lot Size ─────────────────────────────────────────────
+    if features.get("lot_size") is not None:
+        op = features.get("lot_size_operator", "min")
+        params["lotSize"] = f"{features['lot_size']}:" if op == "min" else f":{features['lot_size']}"
+
+    # ── Year Built ───────────────────────────────────────────
+    if features.get("year_built") is not None:
+        op = features.get("year_built_operator", "min")
+        params["yearBuilt"] = f"{features['year_built']}:" if op == "min" else f":{features['year_built']}"
+
+    # ── bedrooms, bathrooms, property_type intentionally NOT passed ──
+    # These are handled by the local scoring function instead.
+
+    # ── Fetch limit — dynamic based on search type ───────────
+    # Precise search (street/near_location) → 100
+    # Broad city search → 500
+    params["limit"]  = 100 if precise_search else 500
     params["status"] = "Active"
 
     response = requests.get(
@@ -132,7 +227,14 @@ def rank_properties(listings: list, features: dict) -> list:
 # ─────────────────────────────────────────────
 # 4. MAIN — ENTRY POINT
 # ─────────────────────────────────────────────
-def find_top_properties(features: dict) -> list:
+def find_top_properties(req: RentalRequirements) -> list:
+    """
+    Main entry point. Accepts a RentalRequirements object directly
+    from the feature extractor — no adapter needed.
+
+    Converts RentalRequirements to a dict internally using model_dump().
+    """
+    features = req.model_dump()
     print(f"🔍 Searching RentCast with features: {features}\n")
 
     listings = fetch_listings(features)
@@ -161,25 +263,19 @@ def find_top_properties(features: dict) -> list:
 # EXAMPLE USAGE
 # ─────────────────────────────────────────────
 # if __name__ == "__main__":
-
-#     # This is what your extracted features dict looks like
-#     # after processing the user's natural language input.
-#     extracted_features = {
-#         "city":          "Austin",
-#         "state":         "TX",
-#         "zip_code":      None,
-#         "bedrooms":      3,
-#         "bathrooms":     2,
-#         "budget":        2500,
-#         "property_type": "Apartment",
-#     }
-
-#     top_properties = find_top_properties(extracted_features)
-
-    # top_properties is a list of 10 dicts, each with:
-    #   - all original RentCast fields (address, price, lat, lng, etc.)
-    #   - _score          (int, 0–100)
-    #   - _score_breakdown (dict, per-criterion scores)
-    #
-    # The latitude/longitude on each property feeds directly
-    # into your next ArcGIS enrichment step.
+#     from feature_extractor import extract_features
+#     import streamlit as st
+#
+#     api_key = st.secrets["GEMINI_API_KEY"]
+#
+#     # Example 1 — city/state search (whole city, limit 500)
+#     req = extract_features("2 bed apartment in Austin TX under $2500", api_key)
+#     top_properties = find_top_properties(req)
+#
+#     # Example 2 — street search (address + radius, limit 100)
+#     req = extract_features("2 bed near 5th Avenue Austin TX under $2500", api_key)
+#     top_properties = find_top_properties(req)
+#
+#     # Example 3 — near_location search (geocode + radius, limit 100)
+#     req = extract_features("2 bed near Rutgers University NJ under $2000", api_key)
+#     top_properties = find_top_properties(req)
