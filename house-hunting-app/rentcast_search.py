@@ -5,6 +5,7 @@ from feature_extractor import RentalRequirements
 RENTCAST_API_KEY = st.secrets["RENTCAST_API_KEY"]
 ARCGIS_API_KEY   = st.secrets["ARCGIS_API_KEY"]
 RENTCAST_BASE_URL = "https://api.rentcast.io/v1"
+SEARCH_RADIUS = 2000  # meters for nearby amenities
 
 
 # ─────────────────────────────────────────────
@@ -86,6 +87,7 @@ def fetch_listings(features: dict) -> list:
         if coords:
             params["latitude"]  = coords[0]
             params["longitude"] = coords[1]
+
             params["radius"]    = features.get("radius") or 3   # miles, default 3
             precise_search      = True
             print(f"  ✅ Geocoded to ({coords[0]:.4f}, {coords[1]:.4f}), radius: {params['radius']} miles")
@@ -158,6 +160,13 @@ def fetch_listings(features: dict) -> list:
 #   Bathrooms match — 20 pts
 #   Property type   — 15 pts
 
+# parking - 30% scoring
+# Area - sq footage
+
+# pet friendly - filter
+# fail safe for radius if properties is less than 10
+
+
 def score_property(property: dict, features: dict) -> dict:
     breakdown = {}
 
@@ -227,14 +236,13 @@ def rank_properties(listings: list, features: dict) -> list:
 # ─────────────────────────────────────────────
 # 4. MAIN — ENTRY POINT
 # ─────────────────────────────────────────────
-def find_top_properties(req: RentalRequirements) -> list:
+def find_top_properties(features: dict) -> list:
     """
     Main entry point. Accepts a RentalRequirements object directly
     from the feature extractor — no adapter needed.
 
     Converts RentalRequirements to a dict internally using model_dump().
     """
-    features = req.model_dump()
     print(f"🔍 Searching RentCast with features: {features}\n")
 
     listings = fetch_listings(features)
@@ -246,18 +254,7 @@ def find_top_properties(req: RentalRequirements) -> list:
     print(f"📦 Fetched {len(listings)} active listings. Scoring and ranking...\n")
 
     top_10 = rank_properties(listings, features)
-
-    print(f"🏆 Top {len(top_10)} Properties:\n")
-    for i, prop in enumerate(top_10, start=1):
-        print(f"{i}. {prop.get('addressLine1')}, {prop.get('city')}, {prop.get('state')} {prop.get('zipCode')}")
-        print(f"   💰 ${prop.get('price')}/mo | 🛏 {prop.get('bedrooms')} bed | 🚿 {prop.get('bathrooms')} bath | 🏠 {prop.get('propertyType')}")
-        print(f"   📍 ({prop.get('latitude')}, {prop.get('longitude')})")
-        bd = prop["_score_breakdown"]
-        print(f"   ⭐ Score: {prop['_score']}/100 | Budget: {bd['budget']:.1f} | Beds: {bd['bedrooms']} | Baths: {bd['bathrooms']} | Type: {bd['property_type']}")
-        print()
-
     return top_10
-
 
 # ─────────────────────────────────────────────
 # EXAMPLE USAGE
