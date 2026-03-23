@@ -7,7 +7,7 @@ Converts a natural language rental query into a structured RentalRequirements
 object using Gemini + Pydantic validation.
 
 Example input : "2 bed apartment under $2400 near Rutgers with parking and grocery stores nearby"
-Example output: RentalRequirements(bedrooms=2, max_budget=2400, location="Rutgers, NJ", ...)
+Example output: RentalRequirements(bedrooms=2, budget=2400, city="New Brunswick", state="NJ", ...)
 """
 
 import json
@@ -24,24 +24,33 @@ from google import genai
 class RentalRequirements(BaseModel):
     """Structured rental preferences extracted from a natural language query."""
 
-    # Core filters
+    # Location
+    street: Optional[str] = Field(None, description="Street address if mentioned (e.g. '220 Lincoln Avenue')")
+    city: Optional[str] = Field(None, description="City name (e.g. 'Austin', 'New Brunswick')")
+    state: Optional[str] = Field(None, description="2-letter state abbreviation (e.g. 'TX', 'NJ')")
+    zip_code: Optional[str] = Field(None, description="ZIP code if mentioned (e.g. '07302')")
+    near_location: Optional[str] = Field(None, description="Any landmark, store, or area the user wants to be near (e.g. 'Rutgers University NJ', 'Walmart Austin TX', 'downtown Austin')")
+    radius: int = Field(3, description="Search radius in miles. Default 3 if not mentioned.")
+
+    # Property specs
     bedrooms: Optional[int] = Field(None, description="Number of bedrooms requested (e.g. 1, 2, 3)")
     bathrooms: Optional[int] = Field(None, description="Number of bathrooms requested")
-    max_budget: Optional[float] = Field(None, description="Maximum monthly rent in USD")
+    property_type: Optional[str] = Field(None, description="One of: Apartment, Condo, Townhouse, Single Family, Multi-Family, Manufactured, or null")
+    square_footage: Optional[float] = Field(None, description="Square footage value if mentioned")
+    square_footage_operator: Optional[str] = Field(None, description="'min' or 'max' — min means at least, max means at most")
+    lot_size: Optional[float] = Field(None, description="Lot size value if mentioned")
+    lot_size_operator: Optional[str] = Field(None, description="'min' or 'max'")
+    year_built: Optional[int] = Field(None, description="Year built if mentioned")
+    year_built_operator: Optional[str] = Field(None, description="'min' or 'max' — min means built after, max means built before")
+
+    # Budget
+    budget: Optional[float] = Field(None, description="Maximum monthly rent in USD")
     min_budget: Optional[float] = Field(None, description="Minimum monthly rent in USD (if specified)")
 
-    # Location
-    location: Optional[str] = Field(None, description="Target city, neighborhood, or landmark (e.g. 'New Brunswick, NJ')")
-    max_commute_minutes: Optional[int] = Field(None, description="Maximum acceptable commute time in minutes")
-    commute_destination: Optional[str] = Field(None, description="Where the user commutes TO (e.g. 'Rutgers University')")
-
-    # Amenities
+    # Extra — not sent to RentCast, passed downstream
     parking_required: Optional[bool] = Field(False, description="True if parking is explicitly required")
     pet_friendly: Optional[bool] = Field(False, description="True if pet-friendly is required")
-    amenities: list[str] = Field(default_factory=list, description="Other amenities mentioned (e.g. ['grocery store', 'gym', 'laundry'])")
-
-    # Property type
-    property_type: Optional[str] = Field(None, description="Type of property: apartment, house, condo, studio, etc.")
+    amenities: list[str] = Field(default_factory=list, description="Names of amenities or places mentioned (e.g. ['Walmart', 'grocery store', 'gym'])")
 
 
 # ---------------------------------------------------------------------------
@@ -55,27 +64,47 @@ Extract structured rental requirements from the user's query below.
 Respond ONLY with a valid JSON object matching this exact schema — no markdown, no explanation, no extra keys:
 
 {{
+  "street": <string or null>,
+  "city": <string or null>,
+  "state": <2-letter abbreviation or null>,
+  "zip_code": <string or null>,
+  "near_location": <string or null>,
+  "radius": <int, default 3 if not mentioned>,
   "bedrooms": <int or null>,
   "bathrooms": <int or null>,
-  "max_budget": <float or null>,
+  "property_type": <"Apartment"|"Condo"|"Townhouse"|"Single Family"|"Multi-Family"|"Manufactured"|null>,
+  "square_footage": <float or null>,
+  "square_footage_operator": <"min"|"max"|null>,
+  "lot_size": <float or null>,
+  "lot_size_operator": <"min"|"max"|null>,
+  "year_built": <int or null>,
+  "year_built_operator": <"min"|"max"|null>,
+  "budget": <float or null>,
   "min_budget": <float or null>,
-  "location": <string or null>,
-  "max_commute_minutes": <int or null>,
-  "commute_destination": <string or null>,
   "parking_required": <true or false>,
   "pet_friendly": <true or false>,
-  "amenities": [<string>, ...],
-  "property_type": <string or null>
+  "amenities": [<string>, ...]
 }}
 
 Rules:
-- If a field is not mentioned, use null (or [] for amenities).
-- For budget: extract the number only (no $ signs). "$2,400" → 2400.0
-- For commute: "under 20 min" → max_commute_minutes: 20
-- For location: infer the full place name if possible (e.g. "near Rutgers" → "New Brunswick, NJ")
-- For amenities: capture things like grocery stores, gym, laundry, transit, parks, etc.
-- For studios: set bedrooms to 0 (a studio has no separate bedroom), unless the query explicitly mentions a number of bedrooms like "1 bed studio", in which case use that number
+- If a field is not mentioned, use null (or 3 for radius, [] for amenities).
+- For budget: extract the number only (no $ signs). "$2,400" → 2400.0. This is the MAXIMUM budget.
+- For location: extract street, city, state, zip_code separately. Infer state if possible (e.g. "near Rutgers" → city: "New Brunswick", state: "NJ")
+- For near_location: if the user says "near X" and X is a landmark, store, university, or area (NOT a street address) → set near_location to "X, City State". If the user gives a specific street address → set street instead. near_location and street should NOT both be set.
+- If user says "near Walmart" → set near_location: "Walmart, City State" AND add "Walmart" to amenities
+- If user mentions a generic amenity like "grocery stores nearby" → add "grocery store" to amenities only (not near_location)
+- For amenities: capture names of specific places or generic amenity types (e.g. ['Walmart', 'grocery store', 'gym', 'laundry', 'park'])
+- For studios: set bedrooms to 0, unless the query explicitly says a number like "1 bed studio" — use that number instead
 - parking_required and pet_friendly must always be true or false (never null)
+- For property_type: map to the closest of Apartment, Condo, Townhouse, Single Family, Multi-Family, Manufactured. "house" → "Single Family", "studio" → "Apartment"
+- For square_footage, lot_size, year_built operators:
+    "at least" / "minimum" / "more than" / "over" / "after" → "min"
+    "at most" / "maximum" / "less than" / "under" / "no more than" / "before" → "max"
+    "around" / "approximately" → "min"
+    e.g. "at least 800 sqft" → square_footage: 800, square_footage_operator: "min"
+    e.g. "built after 2010"  → year_built: 2010, year_built_operator: "min"
+    e.g. "under 1500 sqft"   → square_footage: 1500, square_footage_operator: "max"
+- For radius: if user says "within X miles" → radius: X. If user says "within X km" → convert to miles (1 km = 0.621 miles). Default 3 if not mentioned.
 
 User query: "{query}"
 """
@@ -116,24 +145,40 @@ def format_requirements(req: RentalRequirements) -> str:
     """Human-readable summary of extracted requirements (useful for debugging / UI display)."""
     lines = ["📋 **Extracted Requirements**"]
 
+    # Location
+    location_parts = [p for p in [req.street, req.city, req.state, req.zip_code] if p]
+    if location_parts:
+        lines.append(f"- 📍 Location: {', '.join(location_parts)}")
+    if req.near_location:
+        lines.append(f"- 📌 Near: {req.near_location}")
+    if req.radius:
+        lines.append(f"- 📏 Radius: {req.radius} miles")
+
+    # Property specs
     if req.bedrooms is not None:
         lines.append(f"- 🛏  Bedrooms: {req.bedrooms}")
     if req.bathrooms is not None:
         lines.append(f"- 🚿 Bathrooms: {req.bathrooms}")
     if req.property_type:
         lines.append(f"- 🏠 Property type: {req.property_type}")
-    if req.max_budget is not None:
-        budget_str = f"up to ${req.max_budget:,.0f}/mo"
+    if req.square_footage is not None:
+        op = "at least" if req.square_footage_operator == "min" else "at most" if req.square_footage_operator == "max" else ""
+        lines.append(f"- 📐 Square footage: {op} {req.square_footage:,.0f} sqft".strip())
+    if req.lot_size is not None:
+        op = "at least" if req.lot_size_operator == "min" else "at most" if req.lot_size_operator == "max" else ""
+        lines.append(f"- 🌿 Lot size: {op} {req.lot_size:,.0f}".strip())
+    if req.year_built is not None:
+        op = "after" if req.year_built_operator == "min" else "before" if req.year_built_operator == "max" else ""
+        lines.append(f"- 🏗  Year built: {op} {req.year_built}".strip())
+
+    # Budget
+    if req.budget is not None:
+        budget_str = f"up to ${req.budget:,.0f}/mo"
         if req.min_budget is not None:
-            budget_str = f"${req.min_budget:,.0f} – ${req.max_budget:,.0f}/mo"
+            budget_str = f"${req.min_budget:,.0f} – ${req.budget:,.0f}/mo"
         lines.append(f"- 💰 Budget: {budget_str}")
-    if req.location:
-        lines.append(f"- 📍 Location: {req.location}")
-    if req.commute_destination:
-        commute = f"to {req.commute_destination}"
-        if req.max_commute_minutes:
-            commute += f" within {req.max_commute_minutes} min"
-        lines.append(f"- 🚗 Commute: {commute}")
+
+    # Extras
     if req.parking_required:
         lines.append("- 🅿️  Parking: required")
     if req.pet_friendly:

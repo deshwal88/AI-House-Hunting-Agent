@@ -14,6 +14,7 @@ Usage:
 
 import sys
 import json
+import time
 
 from feature_extractor import extract_features, format_requirements
 import streamlit as st
@@ -51,7 +52,7 @@ TEST_QUERIES = [
         "expect": {
             "bedrooms": 0,
             "parking_required": True,
-            "location": "Jersey City",
+            "city": "Jersey City",
         }
     },
     {
@@ -59,7 +60,33 @@ TEST_QUERIES = [
         "expect": {
             "bedrooms": 2,
             "max_budget": 3500,
-            "property_type": "condo",
+            "property_type": "Condo",
+            "city": "Hoboken",
+        }
+    },
+    {
+        "query": "3 bed house in Austin TX, at least 1200 sqft, under $3000, built after 2005, pet friendly",
+        "expect": {
+            "bedrooms": 3,
+            "max_budget": 3000,
+            "city": "Austin",
+            "state": "TX",
+            "square_footage": 1200,
+            "square_footage_operator": "min",
+            "year_built": 2005,
+            "year_built_operator": "min",
+            "pet_friendly": True,
+        }
+    },
+    {
+        "query": "apartment near 220 Lincoln Avenue Newark NJ 07102, no more than 900 sqft, under $1500",
+        "expect": {
+            "city": "Newark",
+            "state": "NJ",
+            "zip_code": "07102",
+            "max_budget": 1500,
+            "square_footage": 900,
+            "square_footage_operator": "max",
         }
     },
 ]
@@ -73,15 +100,18 @@ def check(req, expect: dict) -> list[str]:
     """Return list of failure messages (empty = all passed)."""
     failures = []
     req_dict = req.model_dump()
+    soft_match_fields = {"location", "city", "state", "commute_destination"}
     for field, expected_val in expect.items():
         actual = req_dict.get(field)
-        if field == "location":
-            # Soft check — just verify the expected string appears somewhere
+        if field in soft_match_fields:
+            # Soft check — just verify expected string appears in actual
             if not actual or expected_val.lower() not in actual.lower():
                 failures.append(f"  {field}: expected to contain '{expected_val}', got '{actual}'")
         elif actual != expected_val:
             failures.append(f"  {field}: expected {expected_val!r}, got {actual!r}")
     return failures
+
+START_FROM = 1  # Set to 1 to run all, or higher to skip already-passed cases
 
 def run_tests():
     print("=" * 60)
@@ -92,6 +122,10 @@ def run_tests():
     failed = 0
 
     for i, tc in enumerate(TEST_QUERIES, 1):
+        if i < START_FROM:
+            print(f"\n[{i}/{len(TEST_QUERIES)}] SKIPPED")
+            print("-" * 60)
+            continue
         query = tc["query"]
         expect = tc["expect"]
 
@@ -120,6 +154,8 @@ def run_tests():
             failed += 1
 
         print("-" * 60)
+        if i < len(TEST_QUERIES):
+            time.sleep(13)  # stay under 5 req/min free tier limit
 
     print(f"\n📊 Results: {passed}/{len(TEST_QUERIES)} passed, {failed} failed")
     return failed == 0
