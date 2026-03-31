@@ -152,25 +152,44 @@ def fetch_listings(features: dict) -> list:
 
 
 # ─────────────────────────────────────────────
+# 1.5 PET FRIENDLY FILTER (before scoring)
+# ─────────────────────────────────────────────
+def filter_pet_friendly(listings: list, features: dict) -> list:
+    """
+    If the user requires a pet-friendly property, remove all listings
+    that are explicitly marked as NOT pet friendly.
+
+    Properties where petFriendly is None/missing are kept — we only
+    remove those explicitly marked False.
+    """
+    if not features.get("pet_friendly"):
+        return listings  # User doesn't need pet-friendly — no filtering
+
+    before = len(listings)
+    filtered = [p for p in listings if p.get("petFriendly") is not False]
+    after = len(filtered)
+
+    if before != after:
+        print(f"  🐾 Pet-friendly filter: removed {before - after} listings, {after} remain")
+
+    return filtered
+
+
+# ─────────────────────────────────────────────
 # 2. SCORE EACH PROPERTY (local, no API call)
 # ─────────────────────────────────────────────
 # Scoring weights (total = 100 pts):
-#   Budget fit      — 40 pts  (most important for renters)
-#   Bedrooms match  — 25 pts
-#   Bathrooms match — 20 pts
-#   Property type   — 15 pts
-
-# parking - 30% scoring
-# Area - sq footage
-
-# pet friendly - filter
-# fail safe for radius if properties is less than 10
-
+#   Budget fit      — 30 pts
+#   Bedrooms match  — 20 pts
+#   Bathrooms match — 15 pts
+#   Property type   — 10 pts
+#   Square footage  — 15 pts
+#   Parking         — 10 pts
 
 def score_property(property: dict, features: dict) -> dict:
     breakdown = {}
 
-    # ── Budget (40 pts) ──────────────────────────────────────
+    # ── Budget (30 pts) ──────────────────────────────────────
     if features.get("budget") and property.get("price"):
         price  = property["price"]
         budget = features["budget"]
@@ -178,42 +197,71 @@ def score_property(property: dict, features: dict) -> dict:
         if price <= budget:
             # Full score if within budget. Small bonus for being well under.
             savings = (budget - price) / budget          # 0.0 → 1.0
-            breakdown["budget"] = min(40, 30 + savings * 10)   # 30–40 pts
+            breakdown["budget"] = min(30, 22 + savings * 8)   # 22–30 pts
         else:
             # Partial score if slightly over budget (up to 10% over)
             overage = (price - budget) / budget
-            breakdown["budget"] = 30 * (1 - overage / 0.10) if overage <= 0.10 else 0
+            breakdown["budget"] = 22 * (1 - overage / 0.10) if overage <= 0.10 else 0
     else:
-        breakdown["budget"] = 20  # Neutral if budget not specified
+        breakdown["budget"] = 15  # Neutral if budget not specified
 
-    # ── Bedrooms (25 pts) ────────────────────────────────────
+    # ── Bedrooms (20 pts) ────────────────────────────────────
     if features.get("bedrooms") is not None and property.get("bedrooms") is not None:
         diff = abs(property["bedrooms"] - features["bedrooms"])
-        if   diff == 0: breakdown["bedrooms"] = 25
-        elif diff == 1: breakdown["bedrooms"] = 15
-        elif diff == 2: breakdown["bedrooms"] = 5
+        if   diff == 0: breakdown["bedrooms"] = 20
+        elif diff == 1: breakdown["bedrooms"] = 12
+        elif diff == 2: breakdown["bedrooms"] = 4
         else:           breakdown["bedrooms"] = 0
     else:
-        breakdown["bedrooms"] = 12  # Neutral
+        breakdown["bedrooms"] = 10  # Neutral
 
-    # ── Bathrooms (20 pts) ───────────────────────────────────
+    # ── Bathrooms (15 pts) ───────────────────────────────────
     if features.get("bathrooms") is not None and property.get("bathrooms") is not None:
         diff = abs(property["bathrooms"] - features["bathrooms"])
-        if   diff == 0:    breakdown["bathrooms"] = 20
-        elif diff <= 0.5:  breakdown["bathrooms"] = 15
-        elif diff <= 1.0:  breakdown["bathrooms"] = 8
+        if   diff == 0:    breakdown["bathrooms"] = 15
+        elif diff <= 0.5:  breakdown["bathrooms"] = 10
+        elif diff <= 1.0:  breakdown["bathrooms"] = 5
         else:              breakdown["bathrooms"] = 0
     else:
-        breakdown["bathrooms"] = 10  # Neutral
+        breakdown["bathrooms"] = 7  # Neutral
 
-    # ── Property Type (15 pts) ───────────────────────────────
+    # ── Property Type (10 pts) ───────────────────────────────
     if features.get("property_type") and property.get("propertyType"):
         breakdown["property_type"] = (
-            15 if property["propertyType"].lower() == features["property_type"].lower()
+            10 if property["propertyType"].lower() == features["property_type"].lower()
             else 0
         )
     else:
-        breakdown["property_type"] = 7  # Neutral if not specified
+        breakdown["property_type"] = 5  # Neutral if not specified
+
+    # ── Square Footage (15 pts) ──────────────────────────────
+    if features.get("square_footage") is not None and property.get("squareFootage") is not None:
+        user_sqft     = features["square_footage"]
+        prop_sqft     = property["squareFootage"]
+        op            = features.get("square_footage_operator", "min")
+
+        if op == "min":
+            # User wants at least X sqft
+            if prop_sqft >= user_sqft:
+                breakdown["square_footage"] = 15                          # Meets or exceeds
+            else:
+                shortfall = (user_sqft - prop_sqft) / user_sqft          # 0.0 → 1.0
+                breakdown["square_footage"] = max(0, 15 * (1 - shortfall * 2))  # Tapers quickly
+        else:
+            # User wants at most X sqft
+            if prop_sqft <= user_sqft:
+                breakdown["square_footage"] = 15                          # Within limit
+            else:
+                excess = (prop_sqft - user_sqft) / user_sqft
+                breakdown["square_footage"] = max(0, 15 * (1 - excess * 2))
+    else:
+        breakdown["square_footage"] = 7  # Neutral if not specified
+
+    # ── Parking (10 pts) ─────────────────────────────────────
+    if features.get("parking_required") and property.get("parkingSpaces") is not None:
+        breakdown["parking"] = 10 if property["parkingSpaces"] > 0 else 0
+    else:
+        breakdown["parking"] = 5  # Neutral if not specified or data missing
 
     total_score = sum(breakdown.values())
 
@@ -234,25 +282,80 @@ def rank_properties(listings: list, features: dict) -> list:
 
 
 # ─────────────────────────────────────────────
-# 4. MAIN — ENTRY POINT
+# 4. RADIUS FAILSAFE
+# ─────────────────────────────────────────────
+def fetch_with_radius_failsafe(features: dict) -> list:
+    """
+    For precise searches (street or near_location), if fewer than 20
+    listings are returned, double the radius and retry — up to 2 times.
+
+    Caps at 100 miles (RentCast maximum).
+
+    City/state searches are not affected — they already cover the whole city.
+    """
+    is_precise = features.get("street") or features.get("near_location")
+
+    if not is_precise:
+        # City/state search — no failsafe needed
+        return fetch_listings(features)
+
+    MAX_DOUBLINGS = 2
+    MIN_RESULTS   = 20
+    MAX_RADIUS    = 100  # miles — RentCast maximum
+
+    current_features = features.copy()
+    listings         = fetch_listings(current_features)
+
+    for attempt in range(1, MAX_DOUBLINGS + 1):
+        if len(listings) >= MIN_RESULTS:
+            break
+
+        current_radius = current_features.get("radius") or 3
+        new_radius     = min(current_radius * 2, MAX_RADIUS)
+
+        print(f"  ⚠️  Only {len(listings)} listings found. Expanding radius: {current_radius} → {new_radius} miles (attempt {attempt}/{MAX_DOUBLINGS})")
+
+        current_features          = current_features.copy()
+        current_features["radius"] = new_radius
+        listings                  = fetch_listings(current_features)
+
+    print(f"  ✅ Radius failsafe complete: {len(listings)} listings found")
+    return listings
+
+
+# ─────────────────────────────────────────────
+# 5. MAIN — ENTRY POINT
 # ─────────────────────────────────────────────
 def find_top_properties(features: dict) -> list:
     """
-    Main entry point. Accepts a RentalRequirements object directly
-    from the feature extractor — no adapter needed.
+    Main entry point. Accepts a features dict from the feature extractor.
 
-    Converts RentalRequirements to a dict internally using model_dump().
+    Pipeline:
+    1. Fetch listings (with radius failsafe for precise searches)
+    2. Filter out non-pet-friendly if required
+    3. Score and rank top 10
     """
     print(f"🔍 Searching RentCast with features: {features}\n")
 
-    listings = fetch_listings(features)
+    # Step 1 — Fetch with radius failsafe
+    listings = fetch_with_radius_failsafe(features)
 
     if not listings:
         print("No listings found for the given criteria.")
         return []
 
-    print(f"📦 Fetched {len(listings)} active listings. Scoring and ranking...\n")
+    print(f"📦 Fetched {len(listings)} active listings.")
 
+    # Step 2 — Pet friendly filter
+    listings = filter_pet_friendly(listings, features)
+
+    if not listings:
+        print("No listings remaining after pet-friendly filter.")
+        return []
+
+    print(f"🏆 Scoring and ranking {len(listings)} listings...\n")
+
+    # Step 3 — Score and rank
     top_10 = rank_properties(listings, features)
     return top_10
 
