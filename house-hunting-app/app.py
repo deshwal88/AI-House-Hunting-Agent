@@ -244,7 +244,7 @@ DEFAULTS: dict = {
     "session_id": None, "search_started": False,
     "ranked_list": [], "preference_profile": "", "iteration": 0,
     "converged": False, "convergence_reason": "", "awaiting_feedback": False,
-    "search_error": None,
+    "search_error": None, "iteration_at_feedback": -1,
 }
 
 for _k, _v in DEFAULTS.items():
@@ -352,9 +352,15 @@ def _poll_backend() -> None:
         resp = requests.get(f"{BACKEND_URL}/state/{sid}", timeout=5)
         if resp.ok:
             data = resp.json()
-            st.session_state.ranked_list        = data.get("ranked_list", [])
+            new_iteration = data.get("iteration", 0)
+            # Only surface ranked_list once the backend has processed the latest
+            # feedback (iteration advances in update_weights).  Without this gate
+            # the very first poll after submission returns the pre-feedback list
+            # because agent_states[sid] still holds it while phase-2 is running.
+            if new_iteration > st.session_state.get("iteration_at_feedback", -1):
+                st.session_state.ranked_list = data.get("ranked_list", [])
             st.session_state.preference_profile = data.get("preference_profile", "")
-            st.session_state.iteration          = data.get("iteration", 0)
+            st.session_state.iteration          = new_iteration
             st.session_state.converged          = data.get("converged", False)
             st.session_state.convergence_reason = data.get("convergence_reason", "")
             st.session_state.awaiting_feedback  = data.get("awaiting_feedback", False)
@@ -568,7 +574,7 @@ def page_review() -> None:
             # Reset backend state
             for k in ("ranked_list","preference_profile","iteration","converged",
                       "convergence_reason","awaiting_feedback","search_error",
-                      "search_started","session_id"):
+                      "search_started","session_id","iteration_at_feedback"):
                 st.session_state[k] = DEFAULTS.get(k)
 
             sid = str(uuid.uuid4())
@@ -784,6 +790,7 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
                     json={"session_id": sid, "ordered_property_ids": sorted_ids},
                     timeout=5,
                 )
+                st.session_state.iteration_at_feedback = st.session_state.iteration
                 st.session_state.awaiting_feedback = False
                 st.session_state.ranked_list = []  # trigger re-poll
                 time.sleep(1)
@@ -811,6 +818,7 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
                     json={"session_id": sid, "ordered_property_ids": sorted_ids},
                     timeout=5,
                 )
+                st.session_state.iteration_at_feedback = st.session_state.iteration
                 st.session_state.awaiting_feedback = False
                 st.session_state.ranked_list = []
                 time.sleep(1)
