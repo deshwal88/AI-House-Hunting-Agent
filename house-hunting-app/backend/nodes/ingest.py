@@ -39,7 +39,7 @@ def ingest_requirements(state: AgentState) -> AgentState:
         log.error("[INGEST] ✗ GEMINI_API_KEY not set — LLM call will fail")
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-8b",
+        model="gemini-3-flash-preview",
         google_api_key=gemini_key,
         temperature=0.2,
     )

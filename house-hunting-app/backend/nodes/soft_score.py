@@ -28,7 +28,7 @@ def soft_score_node(state: AgentState) -> AgentState:
     log.info(f"[SOFT]   Weights: { {k: round(v,3) for k, v in weights.items()} }")
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-8b",
+        model="gemini-3-flash-preview",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.3,
     )

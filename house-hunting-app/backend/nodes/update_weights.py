@@ -60,7 +60,7 @@ def update_weights(state: AgentState) -> AgentState:
         )
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-8b",
+        model="gemini-3-flash-preview",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.2,
     )
@@ -104,7 +104,8 @@ Respond in this exact JSON format (no markdown, no preamble):
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        raw  = resp.content.strip()
+        print(f"LLM response:\n{resp.content}")
+        raw  = resp.content[0]['text'].strip()
         raw  = re.sub(r"^```(?:json)?\s*", "", raw)
         raw  = re.sub(r"\s*```$", "", raw)
         data = json.loads(raw)
