@@ -104,7 +104,7 @@ Respond in this exact JSON format (no markdown, no preamble):
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        print(f"LLM response:\n{resp.content}")
+        # print(f"LLM response:\n{resp.content}")
         raw  = resp.content[0]['text'].strip()
         raw  = re.sub(r"^```(?:json)?\s*", "", raw)
         raw  = re.sub(r"\s*```$", "", raw)
