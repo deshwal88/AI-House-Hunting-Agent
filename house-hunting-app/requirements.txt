@@ -1,3 +1,22 @@
+# ── UI ────────────────────────────────────────────────────────────────────────
 streamlit
-google-genai
+streamlit-sortables
+
+# ── LLM / LangChain stack ─────────────────────────────────────────────────────
+langchain
+langchain-core
+langchain-google-genai
+langgraph
+
+# ── Backend API ───────────────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
 pydantic
+python-dotenv
+requests
+
+# ── Data / scoring ────────────────────────────────────────────────────────────
+numpy
+
+# ── Existing (keep) ───────────────────────────────────────────────────────────
+google-genai
