@@ -79,7 +79,7 @@ Be specific. No filler phrases like "This property offers"."""
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        return resp.content.strip()
+        return resp.content[0]['text'].strip()
     except Exception as e:
         log.warning(f"[SOFT]   ✗ Rationale LLM call failed for {prop.get('address', '?')}: {e}")
         return ""
