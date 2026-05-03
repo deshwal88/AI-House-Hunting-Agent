@@ -24,6 +24,7 @@ def soft_score_node(state: AgentState) -> AgentState:
     props      = state["enriched_properties"]
     iteration  = state.get("iteration", 0)
     weights    = state["soft_weights"]
+
     log.info(f"[SOFT] → Scoring {len(props)} properties  iteration={iteration}")
     log.info(f"[SOFT]   Weights: { {k: round(v,3) for k, v in weights.items()} }")
 
@@ -35,28 +36,22 @@ def soft_score_node(state: AgentState) -> AgentState:
 
     scores:     dict[str, float] = {}
     rationales: dict[str, str]   = {}
-    rationale_count = 0
 
+    props_by_id = {prop["property_id"]: prop for prop in props}
     for prop in props:
-        pid   = prop["property_id"]
-        score = compute_soft_score(prop, weights)
-        scores[pid] = score
+        scores[prop["property_id"]] = compute_soft_score(prop, weights)
 
-        if score >= 0.55:
-            rationale = _generate_rationale(llm, prop, state["preference_profile"])
-            rationales[pid] = rationale
-            rationale_count += 1
+    top10_ids = sorted(scores, key=scores.get, reverse=True)[:10]
+    top10_props = [props_by_id[pid] for pid in top10_ids]
 
-    if scores:
-        top    = max(scores.values())
-        bottom = min(scores.values())
-        log.info(f"[SOFT] ✓ Scores range: {bottom:.3f}–{top:.3f}  rationales generated: {rationale_count}")
-        top3 = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
-        for pid, sc in top3:
-            prop = next((p for p in props if p["property_id"] == pid), {})
-            log.info(f"[SOFT]   {sc:.3f}  {prop.get('address', pid)}, {prop.get('city', '')}")
+    for prop in top10_props:
+        break
+        pid = prop["property_id"]
+        rationale = _generate_rationale(llm, prop, state.get("preference_profile", ""))
+        rationales[pid] = rationale
+        
 
-    state["soft_scores"]    = scores
+    state["soft_scores"] = scores
     state["soft_rationales"] = rationales
     return state
 
@@ -74,12 +69,17 @@ Property:
 - Rent: ${prop.get("rent", "?")}/mo  |  {prop.get("bedrooms", "?")} bed  |  {prop.get("bathrooms", "?")} bath
 - Nearby: {amenity_str or "data unavailable"}
 
-In exactly 1–2 sentences, explain why this property fits this user's preferences.
-Be specific. No filler phrases like "This property offers"."""
+Write a concise rationale in 30–35 words explaining why this property fits the user's preferences.
+Use specific detail, avoid generic filler, and keep it self-contained and easy to read."""
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        return resp.content[0]['text'].strip()
+        rationale = resp.content[0]['text'].strip()
+        words = rationale.split()
+        if len(words) > 35:
+            rationale = " ".join(words[:35]).rstrip(".,;:!") + "..."
+        return rationale
+
     except Exception as e:
         log.warning(f"[SOFT]   ✗ Rationale LLM call failed for {prop.get('address', '?')}: {e}")
         return ""
