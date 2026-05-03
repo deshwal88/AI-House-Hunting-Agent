@@ -13,9 +13,9 @@ WAIT_SECS  = 25
 @tool
 def apify_get_property_images(address: str, city: str, state: str) -> dict:
     """Fetch property photos and floor plan URL using Apify's Zillow scraper."""
-    token = os.getenv("APIFY_API_TOKEN")
+    token = os.getenv("APIFY_API_KEY")
     if not token:
-        log.warning("[APIFY] ✗ APIFY_API_TOKEN not set — skipping images")
+        log.warning("[APIFY] ✗ APIFY_API_KEY not set — skipping images")
         return {"images": [], "floor_plan_url": None}
 
     zillow_url = _build_zillow_url(address, city, state)
@@ -54,8 +54,8 @@ def _build_zillow_url(address: str, city: str, state: str) -> str:
 def _start_actor_run(start_url: str, token: str) -> str | None:
     resp = requests.post(
         f"{APIFY_BASE}/acts/{ACTOR_ID}/runs",
-        params={"token": token, "waitForFinish": WAIT_SECS},
-        json={"searchUrls": [{"url": start_url}], "maxItems": 3},
+        params={"token": token, "waitForFinish": WAIT_SECS, "memory": 128},
+        json={"searchUrls": [{"url": start_url}], "maxItems": 1},
         timeout=WAIT_SECS + 10,
     )
     if not resp.ok:
