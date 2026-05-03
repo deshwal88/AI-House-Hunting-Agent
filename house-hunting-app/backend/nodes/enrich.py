@@ -2,8 +2,7 @@
 Node 3 — enrich_properties
 
 For each property fetched from RentCast:
-  1. Calls Apify (Zillow scraper) to get photo URLs and floor plan.
-  2. Calls ArcGIS Places to get distances to nearby amenities.
+  Calls ArcGIS Places to get distances to nearby amenities.
 
 All properties are enriched in parallel using a thread pool so the total
 wall-clock time is ~max(single property time) instead of sum(all property times).
@@ -13,7 +12,6 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from backend.state import AgentState
-from backend.tools.apify import apify_get_property_images
 from backend.tools.arcgis import arcgis_amenity_distances
 
 log = logging.getLogger("agent.enrich")
@@ -25,23 +23,6 @@ def _enrich_one(prop: dict, index: int, total: int) -> dict:
     lat  = prop.get("latitude")
     lng  = prop.get("longitude")
     log.info(f"[ENRICH]   [{index}/{total}] {addr}")
-
-    # ── Images via Apify ──────────────────────────────────────────────────
-    media = {"images": [], "floor_plan_url": None}
-    if prop.get("address"):
-        try:
-            media = apify_get_property_images.invoke({
-                "address": prop["address"],
-                "city":    prop.get("city", ""),
-                "state":   prop.get("state", ""),
-            })
-            log.info(
-                f"[ENRICH]     [{index}/{total}] Apify → "
-                f"images={len(media['images'])}  "
-                f"floor_plan={'yes' if media['floor_plan_url'] else 'no'}"
-            )
-        except Exception as e:
-            log.warning(f"[ENRICH]     [{index}/{total}] ✗ Apify failed: {e}")
 
     # ── Amenity distances via ArcGIS ──────────────────────────────────────
     amenity_distances: dict[str, float] = {
@@ -60,17 +41,35 @@ def _enrich_one(prop: dict, index: int, total: int) -> dict:
 
     return {
         **prop,
-        "images":            media["images"],
-        "floor_plan_url":    media["floor_plan_url"],
+        "images":            [],
+        "floor_plan_url":    None,
         "amenity_distances": amenity_distances,
     }
 
 
+ENRICH_LIMIT = 15   # enrich only the top candidates to keep Apify/ArcGIS time manageable
+
+
+def _prefilter(props: list[dict], req: dict) -> list[dict]:
+    """Sort by price proximity to the budget midpoint and keep the top ENRICH_LIMIT."""
+    price_min = req.get("property", {}).get("price_min", 0)
+    price_max = req.get("property", {}).get("price_max", 10_000)
+    midpoint  = (price_min + price_max) / 2
+    span      = max(price_max - price_min, 1)
+
+    def _score(p: dict) -> float:
+        rent = p.get("rent") or 0
+        return abs(rent - midpoint) / span
+
+    return sorted(props, key=_score)[:ENRICH_LIMIT]
+
+
 def enrich_properties(state: AgentState) -> AgentState:
-    props = state["properties"]
-    total = len(props)
+    all_props = state["properties"]
+    props     = _prefilter(all_props, state["requirements"])
+    total     = len(props)
     log.info(
-        f"[ENRICH] → Enriching {total} properties in parallel "
+        f"[ENRICH] → Pre-filtered {len(all_props)} → {total} candidates  "
         f"(workers={MAX_WORKERS}, Apify + ArcGIS)"
     )
 

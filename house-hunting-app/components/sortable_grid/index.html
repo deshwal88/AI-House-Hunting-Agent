@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: transparent;
+    padding: 0;
+  }
+
+  #drag-hint {
+    text-align: center;
+    color: #94a3b8;
+    font-size: 0.82rem;
+    margin-bottom: 10px;
+    font-style: italic;
+  }
+
+  #grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    padding: 4px;
+    margin-bottom: 14px;
+  }
+
+  .prop-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+    position: relative;
+    cursor: grab;
+    transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+    user-select: none;
+  }
+  .prop-card:hover {
+    transform: scale(1.05);
+    background-color: #f1f5f9;
+    z-index: 10;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  }
+  .prop-card.sortable-chosen {
+    transform: scale(1.07);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+    cursor: grabbing;
+    z-index: 100;
+  }
+  .prop-card.sortable-ghost {
+    opacity: 0.35;
+    background: #e0e7ef;
+  }
+
+  .prop-img {
+    width: 100%; height: 160px;
+    object-fit: cover;
+    display: block;
+    border-radius: 9px 9px 0 0;
+    pointer-events: none;
+  }
+  .prop-placeholder {
+    width: 100%; height: 160px;
+    background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 42px;
+    border-radius: 9px 9px 0 0;
+  }
+
+  .prop-rank {
+    position: absolute; top: 8px; left: 8px;
+    background: rgba(0,0,0,0.6); color: #fff;
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; z-index: 2;
+  }
+
+  .prop-body {
+    padding: 7px 10px 9px;
+    font-size: 10px;
+    line-height: 1.45;
+    color: #1e293b;
+  }
+  .prop-addr {
+    font-weight: 700;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .prop-sub   { color: #64748b; margin-bottom: 3px; }
+  .prop-meta  { display: flex; justify-content: space-between; align-items: center; }
+  .prop-badge {
+    font-size: 9px; font-weight: 700; color: #fff;
+    border-radius: 10px; padding: 2px 7px;
+  }
+  .prop-rat {
+    font-size: 9px; color: #64748b; font-style: italic; margin-top: 3px;
+    display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  #submit-btn {
+    display: block;
+    width: 100%;
+    padding: 10px 0;
+    background: linear-gradient(135deg, #f97316, #8b5cf6);
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: opacity 0.15s;
+  }
+  #submit-btn:hover { opacity: 0.88; }
+  #submit-btn:active { opacity: 0.75; }
+</style>
+</head>
+<body>
+
+<div id="drag-hint">Drag cards to reorder — the AI will learn your taste and re-rank.</div>
+<div id="grid"></div>
+<button id="submit-btn">✅ Submit My Ranking</button>
+
+<script>
+  const grid = document.getElementById("grid");
+  const btn  = document.getElementById("submit-btn");
+
+  let properties = [];
+
+  function scoreColor(pct) {
+    if (pct >= 70) return "#22c55e";
+    if (pct >= 50) return "#f59e0b";
+    return "#ef4444";
+  }
+
+  function buildCard(prop, rank) {
+    const score = prop.final_score || 0;
+    const pct   = Math.round(score * 100);
+    const color = scoreColor(pct);
+    const addr  = prop.address || "N/A";
+    const city  = prop.city    || "";
+    const state = prop.state   || "";
+    const rent  = prop.rent    || 0;
+    const beds  = prop.bedrooms  != null ? prop.bedrooms  : null;
+    const baths = prop.bathrooms != null ? prop.bathrooms : null;
+    const images = prop.images  || [];
+    const rat   = prop.rationale || "";
+
+    const imgHtml = images.length > 0
+      ? `<img class="prop-img" src="${images[0]}" alt="" draggable="false">`
+      : `<div class="prop-placeholder">🏠</div>`;
+
+    const parts = [];
+    if (rent)        parts.push(`💰 $${rent.toLocaleString()}`);
+    if (beds  != null) parts.push(`🛏 ${beds}`);
+    if (baths != null) parts.push(`🚿 ${baths}`);
+    const meta = parts.join(" · ");
+
+    const ratHtml = rat ? `<div class="prop-rat">${rat}</div>` : "";
+
+    const div = document.createElement("div");
+    div.className = "prop-card";
+    div.dataset.id = prop.property_id;
+    div.innerHTML = `
+      <div class="prop-rank">${rank}</div>
+      ${imgHtml}
+      <div class="prop-body">
+        <div class="prop-addr">${addr}</div>
+        <div class="prop-sub">${city}, ${state}</div>
+        <div class="prop-meta">
+          <span>${meta}</span>
+          <span class="prop-badge" style="background:${color}">${pct}%</span>
+        </div>
+        ${ratHtml}
+      </div>`;
+    return div;
+  }
+
+  function renderGrid(props) {
+    grid.innerHTML = "";
+    props.forEach((p, i) => grid.appendChild(buildCard(p, i + 1)));
+  }
+
+  function updateRanks() {
+    grid.querySelectorAll(".prop-card").forEach((card, i) => {
+      card.querySelector(".prop-rank").textContent = i + 1;
+    });
+  }
+
+  // ── Sortable ──────────────────────────────────────────────────────────────
+  Sortable.create(grid, {
+    animation: 180,
+    ghostClass: "sortable-ghost",
+    chosenClass: "sortable-chosen",
+    onEnd: updateRanks,
+  });
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  btn.addEventListener("click", () => {
+    const ids = Array.from(grid.querySelectorAll(".prop-card"))
+                     .map(c => c.dataset.id);
+    window.parent.postMessage(
+      { type: "streamlit:setComponentValue",
+        value: { ids: ids, submitted: true },
+        dataType: "json" },
+      "*"
+    );
+  });
+
+  // ── Streamlit component protocol ──────────────────────────────────────────
+  window.addEventListener("message", (e) => {
+    if (!e.data) return;
+    const { type, args } = e.data;
+
+    if (type === "streamlit:render") {
+      properties = (args && args.properties) ? args.properties : [];
+      renderGrid(properties);
+
+      // Signal ready (height = grid + hint + button + some padding)
+      const h = document.body.scrollHeight || 600;
+      window.parent.postMessage(
+        { type: "streamlit:setFrameHeight", height: h },
+        "*"
+      );
+    }
+  });
+
+  // Signal component is ready
+  window.parent.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+</script>
+</body>
+</html>

@@ -75,6 +75,7 @@ Return ONLY the preference profile. No preamble, no bullet points, no markdown."
     state["user_feedback"]      = []
     state["ranked_list"]        = []
     state["hard_scores"]        = {}
+
     state["soft_scores"]        = {}
     state["enriched_properties"] = []
     state["properties"]         = []

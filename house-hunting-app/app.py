@@ -224,6 +224,43 @@ st.markdown("""
     text-align: center; color: #94a3b8; font-size: 0.85rem;
     margin: 0 0 12px; font-style: italic;
 }
+
+/* ── Property card grid ───────────────────────────────────────────────── */
+[data-testid="stMarkdownContainer"] { overflow: visible !important; }
+.prop-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 14px; padding: 6px; margin-bottom: 16px;
+}
+.prop-card {
+    border: 1px solid #e2e8f0; border-radius: 10px;
+    background: #fff; position: relative;
+    transition: transform 0.18s ease, background-color 0.18s ease;
+    cursor: default;
+}
+.prop-card:hover { transform: scale(1.1); background-color: #f1f5f9; z-index: 10; }
+.prop-img  { width: 100%; height: 160px; object-fit: cover; display: block; border-radius: 9px 9px 0 0; }
+.prop-placeholder {
+    width: 100%; height: 160px;
+    background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 42px; border-radius: 9px 9px 0 0;
+}
+.prop-rank {
+    position: absolute; top: 8px; left: 8px;
+    background: rgba(0,0,0,0.6); color: #fff;
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; z-index: 2;
+}
+.prop-body  { padding: 7px 10px 9px; font-size: 10px; line-height: 1.45; color: #1e293b; }
+.prop-addr  { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prop-sub   { color: #64748b; margin-bottom: 3px; }
+.prop-meta  { display: flex; justify-content: space-between; align-items: center; }
+.prop-badge { font-size: 9px; font-weight: 700; color: #fff; border-radius: 10px; padding: 2px 7px; }
+.prop-rat   {
+    font-size: 9px; color: #64748b; font-style: italic; margin-top: 3px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -676,7 +713,7 @@ def page_results() -> None:
     if st.session_state.awaiting_feedback and not st.session_state.converged:
         _render_feedback_ui(props, sid)
     else:
-        _render_property_cards(props)
+        _render_property_grid(props)
 
     # ── Bottom controls ───────────────────────────────────────────────────
     st.markdown("---")
@@ -693,74 +730,62 @@ def page_results() -> None:
                 st.rerun()
 
 
-def _render_property_cards(props: list[dict]) -> None:
+def _render_property_grid(props: list[dict]) -> None:
+    """Render all properties as a 5×2 HTML card grid."""
+    cards = []
     for i, prop in enumerate(props, start=1):
-        score = prop.get("final_score", 0)
-        pct   = round(score * 100)
-        color = "#22c55e" if pct >= 70 else "#f59e0b" if pct >= 50 else "#ef4444"
+        score   = prop.get("final_score", 0)
+        pct     = round(score * 100)
+        color   = "#22c55e" if pct >= 70 else "#f59e0b" if pct >= 50 else "#ef4444"
+        addr    = prop.get("address", "N/A")
+        city    = prop.get("city", "")
+        st_val  = prop.get("state", "")
+        rent    = prop.get("rent") or 0
+        beds    = prop.get("bedrooms")
+        baths   = prop.get("bathrooms")
 
-        with st.container(border=True):
-            h1, h2 = st.columns([4, 1])
-            with h1:
-                st.markdown(f"**{i}. {prop.get('address', 'Address N/A')}**")
-                st.caption(f"{prop.get('city','')}, {prop.get('state','')} {prop.get('zip_code','')}")
-            with h2:
-                st.markdown(
-                    f'<div style="text-align:right;padding-top:4px">'
-                    f'<span class="pill" style="background:{color}">{pct}%</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+        images   = prop.get("images") or []
+        img_html = (
+            f'<img class="prop-img" src="{images[0]}" alt="">'
+            if images
+            else '<div class="prop-placeholder">🏠</div>'
+        )
 
-            # Key details
-            parts: list[str] = []
-            if prop.get("rent"):       parts.append(f"💰 **${prop['rent']:,}/mo**")
-            if prop.get("bedrooms") is not None: parts.append(f"🛏 {prop['bedrooms']} bed")
-            if prop.get("bathrooms") is not None: parts.append(f"🚿 {prop['bathrooms']} bath")
-            if prop.get("property_type"): parts.append(f"🏠 {prop['property_type']}")
-            if prop.get("sqft"):       parts.append(f"📐 {int(prop['sqft']):,} sqft")
-            if parts:
-                st.markdown("  ·  ".join(parts))
+        parts = []
+        if rent:              parts.append(f"💰 ${rent:,}")
+        if beds  is not None: parts.append(f"🛏 {beds}")
+        if baths is not None: parts.append(f"🚿 {baths}")
+        meta = " · ".join(parts)
 
-            # Score breakdown
-            h = prop.get("hard_score", 0)
-            s = prop.get("soft_score", 0)
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("Hard score",  f"{h:.0%}")
-            sc2.metric("Soft score",  f"{s:.0%}")
-            sc3.metric("Final score", f"{pct}%")
+        rationale = prop.get("rationale", "")
+        rat_html  = f'<div class="prop-rat">{rationale}</div>' if rationale else ""
 
-            # LLM rationale
-            if prop.get("rationale"):
-                st.info(f"💬 {prop['rationale']}")
+        cards.append(f"""<div class="prop-card">
+  <div class="prop-rank">{i}</div>
+  {img_html}
+  <div class="prop-body">
+    <div class="prop-addr">{addr}</div>
+    <div class="prop-sub">{city}, {st_val}</div>
+    <div class="prop-meta">
+      <span>{meta}</span>
+      <span class="prop-badge" style="background:{color}">{pct}%</span>
+    </div>
+    {rat_html}
+  </div>
+</div>""")
 
-            # Images (if Apify returned any)
-            images = prop.get("images", [])
-            if images:
-                cols = st.columns(min(len(images), 3))
-                for col, url in zip(cols, images[:3]):
-                    with col:
-                        try:
-                            st.image(url, use_container_width=True)
-                        except Exception:
-                            pass
-
-            # Amenity distances
-            amenities = prop.get("amenity_distances", {})
-            if amenities:
-                with st.expander("📍 Nearby amenities"):
-                    am_map = {"grocery":"🛒 Grocery","school":"🏫 School",
-                              "gym":"💪 Gym","transit":"🚌 Transit"}
-                    for key, label in am_map.items():
-                        d = amenities.get(key, 99.0)
-                        if d < 90:
-                            st.markdown(f"**{label}:** {d:.1f} mi away")
+    st.markdown(
+        '<div class="prop-grid">' + "".join(cards) + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_feedback_ui(props: list[dict], sid: str) -> None:
-    """Drag-and-drop reordering UI for the feedback loop."""
+    """Card grid + drag-and-drop sortable list for the feedback loop."""
+    _render_property_grid(props)
+
     st.markdown("---")
-    st.markdown("### 🔄 Refine Your Results")
+    st.markdown("### 🔄 Drag to Refine Your Ranking")
     st.markdown(
         '<div class="drag-hint">Drag properties into your preferred order — '
         'the AI will learn your taste and re-rank.</div>',
@@ -772,16 +797,12 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
             f"#{i+1}  {p.get('address','?')}  —  ${p.get('rent',0):,}/mo"
             for i, p in enumerate(props)
         ]
-        sorted_labels = sort_items(labels, direction="vertical", key="feedback_sort")
-        sorted_ids = []
         label_to_id = {
             f"#{i+1}  {p.get('address','?')}  —  ${p.get('rent',0):,}/mo": p["property_id"]
             for i, p in enumerate(props)
         }
-        for lbl in sorted_labels:
-            pid = label_to_id.get(lbl)
-            if pid:
-                sorted_ids.append(pid)
+        sorted_labels = sort_items(labels, direction="vertical", key="feedback_sort")
+        sorted_ids = [label_to_id[lbl] for lbl in sorted_labels if lbl in label_to_id]
 
         if st.button("✅ Submit My Ranking", type="primary"):
             try:
@@ -792,7 +813,7 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
                 )
                 st.session_state.iteration_at_feedback = st.session_state.iteration
                 st.session_state.awaiting_feedback = False
-                st.session_state.ranked_list = []  # trigger re-poll
+                st.session_state.ranked_list = []
                 time.sleep(1)
                 st.rerun()
             except Exception as e:
@@ -802,16 +823,13 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
         st.warning(
             "Install `streamlit-sortables` for drag-and-drop:  \n"
             "```\npip install streamlit-sortables\n```  \n"
-            "Then restart Streamlit. For now, showing results below."
+            "Then restart Streamlit. For now, use manual ordering below."
         )
-        _render_property_cards(props)
-
-        st.markdown("---")
-        st.markdown("**Or enter your preferred order manually (property numbers, comma-separated):**")
+        st.markdown("**Enter your preferred order (property numbers, comma-separated):**")
         manual_order = st.text_input("e.g. 3,1,5,2,4", key="manual_feedback")
         if st.button("Submit Manual Ranking"):
             try:
-                indices = [int(x.strip()) - 1 for x in manual_order.split(",") if x.strip()]
+                indices    = [int(x.strip()) - 1 for x in manual_order.split(",") if x.strip()]
                 sorted_ids = [props[i]["property_id"] for i in indices if 0 <= i < len(props)]
                 requests.post(
                     f"{BACKEND_URL}/feedback",
