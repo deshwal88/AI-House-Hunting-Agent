@@ -11,6 +11,7 @@ The LLM generates short rationales only for properties that score above 0.55.
 
 import os
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
@@ -33,24 +34,34 @@ def soft_score_node(state: AgentState) -> AgentState:
         temperature=0.3,
     )
 
-    scores:     dict[str, float] = {}
-    rationales: dict[str, str]   = {}
-    rationale_count = 0
+    # Compute all soft scores (pure Python, instant)
+    scores: dict[str, float] = {
+        prop["property_id"]: compute_soft_score(prop, weights)
+        for prop in props
+    }
 
-    for prop in props:
-        pid   = prop["property_id"]
-        score = compute_soft_score(prop, weights)
-        scores[pid] = score
+    # Carry forward rationales from previous iterations; only generate missing ones
+    rationales: dict[str, str] = dict(state.get("soft_rationales") or {})
+    profile = state["preference_profile"]
+    qualifying = [
+        p for p in props
+        if p["property_id"] not in rationales
+    ]
 
-        if score >= 0.55:
-            rationale = _generate_rationale(llm, prop, state["preference_profile"])
-            rationales[pid] = rationale
-            rationale_count += 1
+    if qualifying:
+        with ThreadPoolExecutor(max_workers=len(qualifying)) as pool:
+            futures = {
+                pool.submit(_generate_rationale, llm, prop, profile): prop["property_id"]
+                for prop in qualifying
+            }
+            for future in as_completed(futures):
+                pid = futures[future]
+                rationales[pid] = future.result()
 
     if scores:
         top    = max(scores.values())
         bottom = min(scores.values())
-        log.info(f"[SOFT] ✓ Scores range: {bottom:.3f}–{top:.3f}  rationales generated: {rationale_count}")
+        log.info(f"[SOFT] ✓ Scores range: {bottom:.3f}–{top:.3f}  rationales generated: {len(rationales)}")
         top3 = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
         for pid, sc in top3:
             prop = next((p for p in props if p["property_id"] == pid), {})
