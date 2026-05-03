@@ -25,7 +25,7 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 
-load_dotenv()  # load .env so all os.getenv() calls in tools/nodes work
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"), override=True)
 
 # Logging is configured in start_backend.py via uvicorn's log_config.
 # All agent.* loggers inherit from the "agent" logger defined there.

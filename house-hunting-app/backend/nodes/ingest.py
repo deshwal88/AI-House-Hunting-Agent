@@ -60,7 +60,7 @@ Return ONLY the preference profile. No preamble, no bullet points, no markdown."
     log.info("[INGEST]   Calling Gemini to build preference profile...")
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        profile = resp.content.strip()
+        profile = resp.content[0]['text'].strip()
         log.info(f"[INGEST] ✓ Preference profile built: {profile[:120]}...")
     except Exception as e:
         log.error(f"[INGEST] ✗ LLM call failed: {e}")
