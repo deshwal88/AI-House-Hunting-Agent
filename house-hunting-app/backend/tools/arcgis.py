@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_core.tools import tool
 
 log = logging.getLogger("agent.arcgis")
@@ -30,11 +31,18 @@ def arcgis_amenity_distances(latitude: float, longitude: float) -> dict:
     log.info(f"[ARCGIS] → Looking up amenities at ({latitude:.4f}, {longitude:.4f})")
     results: dict[str, float] = {}
 
-    for amenity, search_text in AMENITY_SEARCHES.items():
-        dist = _nearest_distance_miles(latitude, longitude, search_text, token)
-        results[amenity] = dist
-        status = f"{dist:.2f}mi" if dist < 90 else "not found within 5km"
-        log.info(f"[ARCGIS]   {amenity:10s} → {status}")
+    # Fire all 4 amenity searches in parallel — each is an independent HTTP call
+    with ThreadPoolExecutor(max_workers=len(AMENITY_SEARCHES)) as pool:
+        futures = {
+            pool.submit(_nearest_distance_miles, latitude, longitude, search_text, token): amenity
+            for amenity, search_text in AMENITY_SEARCHES.items()
+        }
+        for future in as_completed(futures):
+            amenity = futures[future]
+            dist = future.result()
+            results[amenity] = dist
+            status = f"{dist:.2f}mi" if dist < 90 else "not found within 5km"
+            log.info(f"[ARCGIS]   {amenity:10s} → {status}")
 
     return results
 

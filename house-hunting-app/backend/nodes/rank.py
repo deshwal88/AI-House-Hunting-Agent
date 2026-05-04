@@ -41,6 +41,7 @@ def rank_and_display(state: AgentState) -> AgentState:
         })
 
     ranked.sort(key=lambda x: x["final_score"], reverse=True)
+    ranked = ranked[:10]   # surface only the top 10 to the UI
 
     log.info(f"[RANK] ✓ Top results:")
     for i, p in enumerate(ranked[:5], 1):

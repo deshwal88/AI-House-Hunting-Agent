@@ -35,8 +35,9 @@ def rentcast_search(
         params["zipCode"] = zip_code
         log.info(f"[RENTCAST] → Searching ZIP={zip_code}  price=${min_price:,}–${max_price:,}")
     else:
-        params["city"]  = city
-        params["state"] = state
+        params["city"]   = city
+        params["state"]  = state
+        params["radius"] = radius_miles
         log.info(f"[RENTCAST] → Searching {city}, {state}  price=${min_price:,}–${max_price:,}  radius={radius_miles}mi")
 
     if bedrooms  is not None:

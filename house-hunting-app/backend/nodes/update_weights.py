@@ -22,7 +22,7 @@ from backend.state import AgentState
 from backend.tools.scorer import weights_converged
 
 log = logging.getLogger("agent.update_weights")
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 1
 
 
 def update_weights(state: AgentState) -> AgentState:
@@ -104,7 +104,6 @@ Respond in this exact JSON format (no markdown, no preamble):
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        print(f"LLM response:\n{resp.content}")
         raw  = resp.content[0]['text'].strip()
         raw  = re.sub(r"^```(?:json)?\s*", "", raw)
         raw  = re.sub(r"\s*```$", "", raw)
@@ -130,7 +129,7 @@ Respond in this exact JSON format (no markdown, no preamble):
 
     # ── Convergence check 2: weight stability ─────────────────────────────
     if weights_converged(old_weights, new_weights):
-        log.info("[WEIGHTS] ✓ Convergence: weights are stable (cosine similarity > 0.97)")
+        log.info("[WEIGHTS] ✓ Convergence: weights are stable (cosine similarity > 0.80)")
         state["converged"]          = True
         state["convergence_reason"] = "Your preferences have stabilised — we've learned your taste!"
         return state
