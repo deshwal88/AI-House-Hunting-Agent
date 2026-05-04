@@ -16,7 +16,7 @@ from backend.tools.rentcast import rentcast_search
 
 log = logging.getLogger("agent.fetch")
 
-FETCH_TARGET      = 50
+FETCH_TARGET      = 20            # enrich only uses 15; 20 gives enough filtering buffer
 RADIUS_MULTIPLIERS = [1, 2, 3]   # successive attempts if target not met
 
 

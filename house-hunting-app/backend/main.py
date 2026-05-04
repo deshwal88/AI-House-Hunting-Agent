@@ -36,7 +36,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.state import AgentState
-from backend.graph import agent_graph
 
 api = FastAPI(title="AI House Finder — Agent Backend", version="1.0")
 
@@ -166,28 +165,7 @@ def _is_awaiting_feedback(sid: str) -> bool:
 async def _run_graph(sid: str, initial_state: AgentState) -> None:
     """
     Runs the LangGraph agent asynchronously.
-    The collect_feedback node calls `await feedback_events[sid].wait()` internally;
-    we inject the event-wait by monkey-patching collect_feedback before graph runs.
     """
-    # Patch collect_feedback to actually await the asyncio.Event
-    from backend.nodes import feedback as fb_module
-
-    original_collect = fb_module.collect_feedback.__wrapped__ \
-        if hasattr(fb_module.collect_feedback, "__wrapped__") \
-        else None
-
-    async def _waiting_collect_feedback(state: AgentState) -> AgentState:
-        event = feedback_events.get(sid)
-        if event:
-            await event.wait()
-        # state["user_feedback"] has been set by /feedback endpoint
-        return state
-
-    # Temporarily override the node function reference used by the graph
-    # LangGraph looks up the function at invoke time from the node dict
-    # so we need to rebuild or patch at the state level instead.
-    # Simpler: run the graph until collect_feedback, then resume manually.
-
     try:
         log.info(f"[GRAPH] ═══ Phase 1 start  session={sid} ═══")
         log.info("[GRAPH]   Steps: ingest → fetch → enrich → hard_score → soft_score → rank")
@@ -237,12 +215,14 @@ async def _run_phase1(sid: str, state: AgentState) -> AgentState:
 
     loop = asyncio.get_event_loop()
 
-    log.info("[GRAPH]   [1/6] ingest_requirements...")
-    state = await loop.run_in_executor(None, ingest_requirements, state)
-    agent_states[sid] = state
-
-    log.info("[GRAPH]   [2/6] fetch_properties...")
-    state = await loop.run_in_executor(None, fetch_properties, state)
+    # ingest and fetch are independent (both only read requirements) — run in parallel
+    log.info("[GRAPH]   [1/6] ingest_requirements + fetch_properties (parallel)...")
+    ingest_state, fetch_state = await asyncio.gather(
+        loop.run_in_executor(None, ingest_requirements, dict(state)),
+        loop.run_in_executor(None, fetch_properties,   dict(state)),
+    )
+    # merge: take all ingest outputs, then overwrite properties from fetch
+    state = {**ingest_state, "properties": fetch_state["properties"]}
     agent_states[sid] = state
     log.info(f"[GRAPH]         → {len(state.get('properties', []))} properties fetched")
 
