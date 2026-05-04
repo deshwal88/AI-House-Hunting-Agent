@@ -376,7 +376,7 @@ iframe.stCustomComponentV1{
 .prop-badge { font-size: 9px; font-weight: 700; color: #fff; border-radius: 10px; padding: 2px 7px; }
 .prop-rat   {
     font-size: 12px; color: #64748b; font-style: italic; margin-top: 3px;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: scroll;
 }
 </style>
 """, unsafe_allow_html=True)
