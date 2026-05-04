@@ -17,16 +17,122 @@ Run:
   Terminal 2: streamlit run app.py
 """
 
+import base64
+import json
+import os
+import random
 import time
 import uuid
 import requests
 import streamlit as st
+import streamlit.components.v1 as stc
 
 try:
     from streamlit_sortables import sort_items
     SORTABLES_AVAILABLE = True
 except ImportError:
     SORTABLES_AVAILABLE = False
+
+# ── Sortable CSS injector ──────────────────────────────────────────────────────
+# streamlit_sortables renders in a same-origin iframe, so a sibling stc.html()
+# frame can walk window.parent's iframes and patch their document's <head>.
+_SORTABLE_CSS = """\
+.sortable-container-body {
+    display: flex !important;
+    flex-wrap: wrap !important;
+}
+
+
+.sortable-item {
+    color: black;
+    background-color: white;
+    cursor: grab;
+    height: 300px;
+    margin: 5px;
+    padding-bottom: 3px;
+    padding-top: 160px;
+    width: 250px;
+    background-size: contain;
+    background-image: url(https://static.vecteezy.com/system/resources/thumbnails/047/022/946/small_2x/modern-two-story-house-with-stone-accents-and-garage-at-dusk-free-photo.jpeg);
+    background-repeat: no-repeat;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.sortable-item:active { cursor: grabbing; opacity: 0.85; }
+.sortable-item:hover { 
+opacity: 0.9;
+margin: 0px;
+padding: 0px;
+background-color: gray; 
+width: 250px;
+height: 300px;
+padding: 160px 0 0 0;
+transition: none;
+
+}
+"""
+
+
+# ── Local image helpers ────────────────────────────────────────────────────────
+_IMAGE_FOLDER: dict[str, str] = {
+    "apartment": "Apartment Images",
+    "condo":     "Apartment Images",
+    "townhouse": "Townhouse images",
+}
+
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@st.cache_data
+def _load_local_images(folder_key: str) -> list[str]:
+    """Read all images from a local folder and return as base64 data-URLs (cached)."""
+    folder = os.path.join(_APP_DIR, "House Images", folder_key)
+    urls: list[str] = []
+    for fname in sorted(os.listdir(folder)):
+        if not fname.lower().endswith((".webp", ".jpg", ".jpeg", ".png")):
+            continue
+        with open(os.path.join(folder, fname), "rb") as fh:
+            data = base64.b64encode(fh.read()).decode()
+        ext  = fname.rsplit(".", 1)[-1].lower()
+        mime = "image/webp" if ext == "webp" else f"image/{ext}"
+        urls.append(f"data:{mime};base64,{data}")
+    return urls
+
+
+def _folder_for_type(property_type: str) -> str:
+    return _IMAGE_FOLDER.get(property_type.lower(), "Apartment Images")
+
+
+def _inject_sortable_css() -> None:
+    """Inject custom CSS into the streamlit_sortables iframe via sibling-frame JS."""
+    css_js = json.dumps(_SORTABLE_CSS)   # safely escaped for embedding in JS
+    stc.html(
+        f"""<script>
+(function() {{
+    var css = {css_js};
+    function inject() {{
+        var frames = window.parent.document.querySelectorAll("iframe");
+        var done = false;
+        frames.forEach(function(f) {{
+            try {{
+                var d = f.contentDocument || f.contentWindow.document;
+                if (!d || d.getElementById("_sc_css")) return;
+                if (!d.querySelector(".sortable-item")) return;
+                var el = d.createElement("style");
+                el.id = "_sc_css";
+                el.textContent = css;
+                d.head.appendChild(el);
+                done = true;
+            }} catch(e) {{}}
+        }});
+        if (!done) setTimeout(inject, 200);
+    }}
+    inject();
+    [300, 700, 1500].forEach(function(t) {{ setTimeout(inject, t); }});
+}})();
+</script>""",
+        height=0,
+    )
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BACKEND_URL = "http://localhost:8000"
@@ -41,7 +147,7 @@ st.set_page_config(
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.block-container { max-width: 780px; padding-top: 2rem; }
+.block-container { max-width: 95vw; padding-top: 2rem; }
 
 /* Welcome hero */
 .hero { text-align: center; padding: 48px 0 28px; }
@@ -282,6 +388,7 @@ DEFAULTS: dict = {
     "ranked_list": [], "preference_profile": "", "iteration": 0,
     "converged": False, "convergence_reason": "", "awaiting_feedback": False,
     "search_error": None, "iteration_at_feedback": -1,
+    "prop_images": {},
 }
 
 for _k, _v in DEFAULTS.items():
@@ -611,7 +718,7 @@ def page_review() -> None:
             # Reset backend state
             for k in ("ranked_list","preference_profile","iteration","converged",
                       "convergence_reason","awaiting_feedback","search_error",
-                      "search_started","session_id","iteration_at_feedback"):
+                      "search_started","session_id","iteration_at_feedback","prop_images"):
                 st.session_state[k] = DEFAULTS.get(k)
 
             sid = str(uuid.uuid4())
@@ -709,6 +816,15 @@ def page_results() -> None:
     # ── Property cards ────────────────────────────────────────────────────
     props = st.session_state.ranked_list
 
+    # Assign local images once per search (no repeats across the 10 cards)
+    if not st.session_state.prop_images:
+        folder  = _folder_for_type(st.session_state.property_type)
+        pool    = _load_local_images(folder)
+        picked  = random.sample(pool, min(len(pool), len(props)))
+        st.session_state.prop_images = {
+            p["property_id"]: picked[i] for i, p in enumerate(props)
+        }
+
     # Drag-and-drop reordering (shown only while awaiting feedback)
     if st.session_state.awaiting_feedback and not st.session_state.converged:
         _render_feedback_ui(props, sid)
@@ -744,7 +860,11 @@ def _render_property_grid(props: list[dict]) -> None:
         beds    = prop.get("bedrooms")
         baths   = prop.get("bathrooms")
 
-        images   = prop.get("images") or []
+        images = prop.get("images") or []
+        if not images:
+            local = st.session_state.get("prop_images", {}).get(prop.get("property_id"))
+            if local:
+                images = [local]
         img_html = (
             f'<img class="prop-img" src="{images[0]}" alt="">'
             if images
@@ -781,28 +901,49 @@ def _render_property_grid(props: list[dict]) -> None:
 
 
 def _render_feedback_ui(props: list[dict], sid: str) -> None:
-    """Card grid + drag-and-drop sortable list for the feedback loop."""
-    _render_property_grid(props)
+    """Sortable feedback UI — cards merged into draggable one-line items."""
 
-    st.markdown("---")
-    st.markdown("### 🔄 Drag to Refine Your Ranking")
-    st.markdown(
-        '<div class="drag-hint">Drag properties into your preferred order — '
-        'the AI will learn your taste and re-rank.</div>',
-        unsafe_allow_html=True,
-    )
+    # Banner header: default house background, 160 px, cover
+    st.markdown("""
+    <div style="
+        width:100%; height:160px; border-radius:12px; margin-bottom:14px;
+        background:linear-gradient(135deg,#e2e8f0,#cbd5e1);
+        background-size:cover; background-position:center;
+        display:flex; flex-direction:column;
+        align-items:center; justify-content:center; gap:8px;
+    ">
+        <span style="font-size:48px;line-height:1;">🏠</span>
+        <span style="font-weight:700;font-size:1.05rem;color:#475569;">
+            Drag to Refine Your Ranking
+        </span>
+        <span style="font-size:0.8rem;color:#64748b;">
+            Re-order the properties below — the AI will learn your taste and re-rank.
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
 
     if SORTABLES_AVAILABLE:
-        labels = [
-            f"#{i+1}  {p.get('address','?')}  —  ${p.get('rent',0):,}/mo"
-            for i, p in enumerate(props)
-        ]
-        label_to_id = {
-            f"#{i+1}  {p.get('address','?')}  —  ${p.get('rent',0):,}/mo": p["property_id"]
-            for i, p in enumerate(props)
-        }
+        # Format each property as a compact single line before passing to sortables
+        id_map: dict[str, str] = {}
+        labels: list[str] = []
+        for i, p in enumerate(props):
+            pct  = round(p.get("final_score", 0) * 100)
+            beds = p.get("bedrooms")
+            bath = p.get("bathrooms")
+            bed_bath = f"{beds}bd · {bath}ba" if beds is not None and bath is not None else ""
+            label = (
+                f"#{i+1}  {p.get('address','?')}  |  "
+                f"{p.get('city','')}, {p.get('state','')}  |  "
+                f"${p.get('rent', 0):,}/mo"
+                + (f"  |  {bed_bath}" if bed_bath else "")
+                + f"  |  {pct}%"
+            )
+            labels.append(label)
+            id_map[label] = p["property_id"]
+
         sorted_labels = sort_items(labels, direction="vertical", key="feedback_sort")
-        sorted_ids = [label_to_id[lbl] for lbl in sorted_labels if lbl in label_to_id]
+        _inject_sortable_css()
+        sorted_ids = [id_map[lbl] for lbl in sorted_labels if lbl in id_map]
 
         if st.button("✅ Submit My Ranking", type="primary"):
             try:
@@ -823,10 +964,10 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
         st.warning(
             "Install `streamlit-sortables` for drag-and-drop:  \n"
             "```\npip install streamlit-sortables\n```  \n"
-            "Then restart Streamlit. For now, use manual ordering below."
+            "Then restart Streamlit."
         )
-        st.markdown("**Enter your preferred order (property numbers, comma-separated):**")
-        manual_order = st.text_input("e.g. 3,1,5,2,4", key="manual_feedback")
+        manual_order = st.text_input("Manual order (comma-separated ranks, e.g. 3,1,5,2,4):",
+                                     key="manual_feedback")
         if st.button("Submit Manual Ranking"):
             try:
                 indices    = [int(x.strip()) - 1 for x in manual_order.split(",") if x.strip()]

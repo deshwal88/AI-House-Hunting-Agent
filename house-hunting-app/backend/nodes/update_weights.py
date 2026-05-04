@@ -22,7 +22,7 @@ from backend.state import AgentState
 from backend.tools.scorer import weights_converged
 
 log = logging.getLogger("agent.update_weights")
-MAX_ITERATIONS = 3
+MAX_ITERATIONS = 1
 
 
 def update_weights(state: AgentState) -> AgentState:
