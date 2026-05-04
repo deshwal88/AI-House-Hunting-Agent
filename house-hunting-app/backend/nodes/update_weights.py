@@ -60,7 +60,7 @@ def update_weights(state: AgentState) -> AgentState:
         )
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
+        model="gemini-3.1-flash-lite-preview",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.2,
     )
@@ -93,7 +93,9 @@ Respond in this exact JSON format (no markdown, no preamble):
     "gym_distance": 0.0,
     "transit_distance": 0.0,
     "pet_friendly": 0.0,
-    "quiet_neighborhood": 0.0
+    "quiet_neighborhood": 0.0,
+    "area": 0.0,
+    "price_value": 0.0
   }},
   "reasoning": "one sentence explaining the key weight change"
 }}"""

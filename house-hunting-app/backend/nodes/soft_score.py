@@ -17,7 +17,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 from backend.state import AgentState
-from backend.tools.scorer import soft_score as compute_soft_score
+from backend.tools.scorer import soft_score as compute_soft_score, normalize_sqft
 
 log = logging.getLogger("agent.soft_score")
 
@@ -35,9 +35,17 @@ def soft_score_node(state: AgentState) -> AgentState:
         temperature=0.3,
     )
 
+    # Batch-normalize sqft across the current property pool
+    sqft_norms   = normalize_sqft(props)
+    requirements = state.get("requirements", {})
+
     # Compute all soft scores (pure Python, instant)
     scores: dict[str, float] = {
-        prop["property_id"]: compute_soft_score(prop, weights)
+        prop["property_id"]: compute_soft_score(
+            prop, weights,
+            sqft_norm=sqft_norms[prop["property_id"]],
+            requirements=requirements,
+        )
         for prop in props
     }
 
