@@ -389,11 +389,12 @@ DEFAULTS: dict = {
     # Commute
     "has_commute": False, "commute_destination": "", "max_commute_minutes": 30,
     # Property
-    "property_type": "Any", "bedrooms": "Any", "bathrooms": "Any",
+    "property_type": "Apartment", "bedrooms": "1", "bathrooms": "1",
     # Budget
     "min_budget": 800, "max_budget": 3000,
     # Preferences
     "pet_friendly": False, "parking_required": False, "amenities": [],
+    "additional_comments": "",
     # Backend session
     "session_id": None, "search_started": False,
     "ranked_list": [], "preference_profile": "", "iteration": 0,
@@ -413,9 +414,9 @@ US_STATES = [
     "NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT",
     "VT","VA","WA","WV","WI","WY",
 ]
-PROPERTY_TYPES = ["Any","Apartment","Condo","Townhouse","Single Family","Multi-Family"]
-BED_OPTIONS    = ["Any","Studio","1","2","3","4","5+"]
-BATH_OPTIONS   = ["Any","1","1.5","2","2.5","3+"]
+PROPERTY_TYPES = ["Apartment","Condo","Townhouse","Single Family","Multi-Family"]
+BED_OPTIONS    = ["Studio","1","2","3","4","5+"]
+BATH_OPTIONS   = ["1","1.5","2","2.5","3+"]
 AMENITY_OPTIONS = [
     "Gym / Fitness Center","Swimming Pool","In-unit Laundry","Laundry in Building",
     "Dishwasher","Air Conditioning","Balcony / Patio","Grocery Store Nearby",
@@ -446,15 +447,15 @@ def nav(*, back: bool = True, next_label: str = "Continue →",
 
 
 def _parse_beds(v: str | None) -> int | None:
-    if v in ("Any", None): return None
-    if v == "Studio":      return 0
-    if v == "5+":          return 5
+    if v is None:     return None
+    if v == "Studio": return 0
+    if v == "5+":     return 5
     return int(v)
 
 
 def _parse_baths(v: str | None) -> float | None:
-    if v in ("Any", None): return None
-    if v == "3+":          return 3.0
+    if v is None:  return None
+    if v == "3+":  return 3.0
     return float(v)
 
 
@@ -472,8 +473,7 @@ def _build_requirements() -> dict:
             "price_min":     st.session_state.min_budget,
             "price_max":     st.session_state.max_budget,
             "property_type": (
-                None if st.session_state.property_type == "Any"
-                else st.session_state.property_type.lower().replace(" ", "_")
+                st.session_state.property_type.lower().replace(" ", "_")
             ),
         },
         "amenities": {
@@ -495,7 +495,7 @@ def _build_requirements() -> dict:
                 if st.session_state.has_commute else None
             ),
         },
-        "additional_comments": "",
+        "additional_comments": st.session_state.additional_comments,
     }
 
 
@@ -557,6 +557,29 @@ def page_welcome() -> None:
 def page_location() -> None:
     render_progress(1)
     st.markdown("## 📍 Where do you want to live?")
+
+    # st.markdown strips <script> tags; components.html runs in an iframe that can
+    # reach the parent Streamlit DOM via window.parent to suppress Chrome autofill.
+    components.html("""
+    <script>
+    (function() {
+        function patch() {
+            try {
+                window.parent.document.querySelectorAll('input[type="text"]').forEach(function(el) {
+                    el.setAttribute('autocomplete', 'new-password');
+                    el.setAttribute('autocorrect', 'off');
+                    el.setAttribute('autocapitalize', 'off');
+                    el.setAttribute('spellcheck', 'false');
+                });
+            } catch(e) {}
+        }
+        patch();
+        new MutationObserver(patch).observe(
+            window.parent.document.body, { childList: true, subtree: true }
+        );
+    })();
+    </script>
+    """, height=0)
 
     c1, c2 = st.columns([3, 2])
     with c1:
@@ -676,6 +699,17 @@ def page_preferences() -> None:
         default=[a for a in st.session_state.amenities if a in AMENITY_OPTIONS],
         label_visibility="collapsed", placeholder="Choose amenities…")
 
+    st.markdown("---")
+    st.markdown('<div class="section-label">Anything else?</div>',
+                unsafe_allow_html=True)
+    st.session_state.additional_comments = st.text_area(
+        "Additional requirements",
+        value=st.session_state.additional_comments,
+        placeholder='e.g. "I work from home and have a large dog, need a quiet area with outdoor space"',
+        height=90,
+        label_visibility="collapsed",
+    )
+
     nav(next_label="Review & Search 🔍")
 
 
@@ -704,10 +738,12 @@ def page_review() -> None:
     with c2:
         st.markdown("**🏠 Property**")
         parts = []
-        if st.session_state.property_type != "Any": parts.append(st.session_state.property_type)
-        if st.session_state.bedrooms != "Any":       parts.append(f"{st.session_state.bedrooms} bed")
-        if st.session_state.bathrooms != "Any":      parts.append(f"{st.session_state.bathrooms} bath")
-        st.info(", ".join(parts) if parts else "Any type / size")
+        parts = [
+            st.session_state.property_type,
+            f"{st.session_state.bedrooms} bed",
+            f"{st.session_state.bathrooms} bath",
+        ]
+        st.info(", ".join(parts))
 
         st.markdown("**✨ Preferences**")
         prefs: list[str] = []
@@ -717,6 +753,10 @@ def page_review() -> None:
         extra = len(st.session_state.amenities) - 4
         if extra > 0: prefs.append(f"…+{extra} more")
         st.info("\n".join(prefs) if prefs else "None")
+
+    if st.session_state.additional_comments.strip():
+        st.markdown("**💬 Additional requirements**")
+        st.info(st.session_state.additional_comments.strip())
 
     st.markdown("---")
     cb, _, cs = st.columns([1, 1, 2])
