@@ -16,21 +16,29 @@ from backend.state import AgentState
 
 log = logging.getLogger("agent.rank")
 
-HARD_WEIGHT = 0.6
-SOFT_WEIGHT = 0.4
+HARD_WEIGHT_INITIAL  = 0.6   # before any feedback
+SOFT_WEIGHT_INITIAL  = 0.4
+HARD_WEIGHT_FEEDBACK = 0.3   # after feedback — learned preferences dominate
+SOFT_WEIGHT_FEEDBACK = 0.7
 
 
 def rank_and_display(state: AgentState) -> AgentState:
     props     = state["enriched_properties"]
     iteration = state.get("iteration", 0)
-    log.info(f"[RANK] → Ranking {len(props)} properties  iteration={iteration}  (hard×{HARD_WEIGHT} + soft×{SOFT_WEIGHT})")
+
+    if iteration == 0:
+        hard_w, soft_w = HARD_WEIGHT_INITIAL, SOFT_WEIGHT_INITIAL
+    else:
+        hard_w, soft_w = HARD_WEIGHT_FEEDBACK, SOFT_WEIGHT_FEEDBACK
+
+    log.info(f"[RANK] → Ranking {len(props)} properties  iteration={iteration}  (hard×{hard_w} + soft×{soft_w})")
     ranked: list[dict] = []
 
     for prop in props:
         pid = prop["property_id"]
         h   = state["hard_scores"].get(pid, 0.0)
         s   = state["soft_scores"].get(pid, 0.0)
-        final = round(HARD_WEIGHT * h + SOFT_WEIGHT * s, 4)
+        final = round(hard_w * h + soft_w * s, 4)
 
         ranked.append({
             **prop,

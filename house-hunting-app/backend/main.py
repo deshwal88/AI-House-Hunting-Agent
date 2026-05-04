@@ -260,15 +260,14 @@ async def _run_phase2(sid: str, state: AgentState) -> AgentState:
     state = await loop.run_in_executor(None, update_weights, state)
     agent_states[sid] = state
 
-    if not state.get("converged", False):
-        log.info("[GRAPH]   [2/3] soft_score_node...")
-        state = await loop.run_in_executor(None, soft_score_node, state)
-        agent_states[sid] = state
+    # Always re-score and re-rank with the updated weights — convergence only
+    # means no further feedback rounds, not that the final ranking is skipped.
+    log.info("[GRAPH]   [2/3] soft_score_node...")
+    state = await loop.run_in_executor(None, soft_score_node, state)
+    agent_states[sid] = state
 
-        log.info("[GRAPH]   [3/3] rank_and_display...")
-        state = await loop.run_in_executor(None, rank_and_display, state)
-        agent_states[sid] = state
-    else:
-        log.info("[GRAPH]   Converged — skipping re-score and re-rank")
+    log.info("[GRAPH]   [3/3] rank_and_display...")
+    state = await loop.run_in_executor(None, rank_and_display, state)
+    agent_states[sid] = state
 
     return state

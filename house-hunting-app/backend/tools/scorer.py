@@ -76,6 +76,14 @@ def hard_score(property: dict, requirements: dict, sqft_per_dollar_norm: float =
     return round(min(score, 1.0), 4)
 
 
+def normalize_sqft(properties: list[dict]) -> dict[str, float]:
+    """Normalize raw sqft values (0-1) across a batch. Larger sqft = higher score."""
+    vals: dict[str, float] = {p["property_id"]: float(p.get("sqft") or 0) for p in properties}
+    lo, hi = min(vals.values()), max(vals.values())
+    span = hi - lo if hi > lo else 1.0
+    return {pid: round((v - lo) / span, 4) for pid, v in vals.items()}
+
+
 def normalize_sqft_per_dollar(properties: list[dict]) -> dict[str, float]:
     """
     Compute and normalize sqft/price ratios across a batch of properties.
@@ -97,53 +105,77 @@ def normalize_sqft_per_dollar(properties: list[dict]) -> dict[str, float]:
 # ── Soft scoring ──────────────────────────────────────────────────────────────
 
 DEFAULT_SOFT_WEIGHTS: dict[str, float] = {
-    "grocery_distance":  1 / 6,
-    "school_distance":   1 / 6,
-    "gym_distance":      1 / 6,
-    "transit_distance":  1 / 6,
-    "pet_friendly":      1 / 6,
-    "quiet_neighborhood": 1 / 6,
+    "grocery_distance":   1 / 8,
+    "school_distance":    1 / 8,
+    "gym_distance":       1 / 8,
+    "transit_distance":   1 / 8,
+    "pet_friendly":       1 / 8,
+    "quiet_neighborhood": 1 / 8,
+    "area":               1 / 8,
+    "price_value":        1 / 8,
 }
 
 
-def soft_score(property: dict, soft_weights: dict | None = None) -> float:
+def soft_score(
+    property: dict,
+    soft_weights: dict | None = None,
+    sqft_norm: float = 0.5,
+    requirements: dict | None = None,
+) -> float:
     """
     Score a property on learnable, preference-based criteria.
 
-    The weights default to equal (1/6 each) and are updated by the LLM
-    in update_weights node after each feedback round.
+    Weights default to equal (1/8 each) and are updated by the LLM after
+    each feedback round.
+
+    sqft_norm    : pre-computed batch-normalized sqft value (0–1).
+    requirements : full requirements dict; used to compute price_value.
 
     Returns:
         float in [0, 1]
     """
-    weights = soft_weights if soft_weights else DEFAULT_SOFT_WEIGHTS
+    weights   = soft_weights if soft_weights else DEFAULT_SOFT_WEIGHTS
     amenities = property.get("amenity_distances", {})
-    score = 0.0
+    score     = 0.0
 
     # ── Grocery (linear decay: 0 mi = 1.0, ≥2 mi = 0.0) ──────────────────
     d = amenities.get("grocery", 99.0)
-    score += weights.get("grocery_distance", 1/6) * max(0.0, 1.0 - d / 2.0)
+    score += weights.get("grocery_distance", 1/8) * max(0.0, 1.0 - d / 2.0)
 
     # ── School (linear decay: 0 mi = 1.0, ≥3 mi = 0.0) ───────────────────
     d = amenities.get("school", 99.0)
-    score += weights.get("school_distance", 1/6) * max(0.0, 1.0 - d / 3.0)
+    score += weights.get("school_distance", 1/8) * max(0.0, 1.0 - d / 3.0)
 
     # ── Gym (linear decay: 0 mi = 1.0, ≥2 mi = 0.0) ─────────────────────
     d = amenities.get("gym", 99.0)
-    score += weights.get("gym_distance", 1/6) * max(0.0, 1.0 - d / 2.0)
+    score += weights.get("gym_distance", 1/8) * max(0.0, 1.0 - d / 2.0)
 
     # ── Transit (linear decay: 0 mi = 1.0, ≥0.5 mi = 0.0) ────────────────
     d = amenities.get("transit", 99.0)
-    score += weights.get("transit_distance", 1/6) * max(0.0, 1.0 - d / 0.5)
+    score += weights.get("transit_distance", 1/8) * max(0.0, 1.0 - d / 0.5)
 
     # ── Pet friendly (binary) ─────────────────────────────────────────────
     pet_ok = 1.0 if property.get("petFriendly") or property.get("pet_friendly") else 0.0
-    score += weights.get("pet_friendly", 1/6) * pet_ok
+    score += weights.get("pet_friendly", 1/8) * pet_ok
 
-    # ── Quiet neighborhood (proxy: low transit density = quieter) ─────────
-    transit_d = amenities.get("transit", 99.0)
-    quiet_proxy = max(0.0, min(1.0, transit_d / 1.0))  # farther from transit = quieter
-    score += weights.get("quiet_neighborhood", 1/6) * quiet_proxy
+    # ── Quiet neighborhood (proxy: far from busy gym areas = quieter) ──────
+    gym_d = amenities.get("gym", 99.0)
+    quiet_proxy = max(0.0, min(1.0, gym_d / 2.0))
+    score += weights.get("quiet_neighborhood", 1/8) * quiet_proxy
+
+    # ── Area — larger sqft relative to the batch is better ────────────────
+    score += weights.get("area", 1/8) * sqft_norm
+
+    # ── Price value — lower rent within budget range is better ────────────
+    prop_section = (requirements or {}).get("property", {})
+    price_min    = prop_section.get("price_min", 0) or 0
+    price_max    = prop_section.get("price_max", None) or None
+    rent         = property.get("rent") or 0
+    if price_max and price_max > price_min:
+        price_val = max(0.0, min(1.0, (price_max - rent) / (price_max - price_min)))
+    else:
+        price_val = 0.5
+    score += weights.get("price_value", 1/8) * price_val
 
     return round(min(score, 1.0), 4)
 
