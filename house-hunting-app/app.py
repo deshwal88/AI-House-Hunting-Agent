@@ -45,22 +45,25 @@ _SORTABLE_CSS = """\
 
 
 .sortable-item {
-    color: black;
+    color: #5c5959;
     background-color: white;
     cursor: grab;
-    height: 40vh;
+    height: 41vh;
     margin: 5px;
-    padding-bottom: 3px;
+    padding-bottom: 10px;
     padding-top: 160px;
     width: calc(20vw - 20px);
     background-size: contain;
     background-image: url(https://static.vecteezy.com/system/resources/thumbnails/047/022/946/small_2x/modern-two-story-house-with-stone-accents-and-garage-at-dusk-free-photo.jpeg);
     background-repeat: no-repeat;
     border-radius: 6px;
-    overflow: hidden;
+    overflow: clip;
+    white-space: pre-line !important;
+    font-size: 12px;
 }
 .sortable-item:active { cursor: grabbing; opacity: 0.85; }
 .sortable-item:hover { 
+background-image: none;
 color: black;
 opacity: 0.9;
 margin: 0px;
@@ -68,9 +71,10 @@ padding: 0px;
 background-color: #c1d4d9 !important; 
 width: calc(20vw - 20px);
 height: 40vh;
-padding: 160px 0 0 0;
+padding: 10px 0 0 0;
 transition: none;
-
+display: flex !important;
+align-items: center !important;
 }
 """
 
@@ -831,7 +835,6 @@ def page_results() -> None:
         st.session_state.prop_images = {
             p["property_id"]: picked[i] for i, p in enumerate(props)
         }
-        print(st.session_state.prop_images)
 
     # Drag-and-drop reordering (shown only while awaiting feedback)
     if st.session_state.awaiting_feedback and not st.session_state.converged:
@@ -910,7 +913,6 @@ def _render_property_grid(props: list[dict]) -> None:
 
 def _render_feedback_ui(props: list[dict], sid: str) -> None:
     """Sortable feedback UI — cards merged into draggable one-line items."""
-
     # Banner header: default house background, 160 px, cover
     st.markdown("""
     <div style="
@@ -938,13 +940,13 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
             pct  = round(p.get("final_score", 0) * 100)
             beds = p.get("bedrooms")
             bath = p.get("bathrooms")
-            bed_bath = f"{beds}bd · {bath}ba" if beds is not None and bath is not None else ""
+            bed_bath = f"{beds} Bed · {bath} Bath" if beds is not None and bath is not None else ""
             label = (
-                f"#{i+1}  {p.get('address','?')}  |  "
-                f"{p.get('city','')}, {p.get('state','')}  |  "
-                f"${p.get('rent', 0):,}/mo"
-                + (f"  |  {bed_bath}" if bed_bath else "")
-                + f"  |  {pct}%"
+                f"{pct}% Match\n" +
+                f"{p.get('address','?')}, {p.get('city','')}\n"
+                + (f"{bed_bath} | " if bed_bath else "")
+                + f"${p.get('rent', 0):,}/mo\n"
+                + f"{p.get('rationale','')}" if p.get("rationale") else ""
             )
             labels.append(label)
             id_map[label] = p["property_id"]
