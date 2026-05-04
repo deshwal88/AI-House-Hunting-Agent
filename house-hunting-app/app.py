@@ -51,7 +51,7 @@ _SORTABLE_CSS = """\
     height: 41vh;
     margin: 5px;
     padding-bottom: 10px;
-    padding-top: 160px;
+    padding-top: 11.2vw;
     width: calc(20vw - 20px);
     background-size: contain;
     background-image: url(https://static.vecteezy.com/system/resources/thumbnails/047/022/946/small_2x/modern-two-story-house-with-stone-accents-and-garage-at-dusk-free-photo.jpeg);
