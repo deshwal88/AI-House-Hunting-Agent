@@ -52,7 +52,7 @@ def main():
     st.session_state.page = 7
     st.session_state.session_id = "sample-session"
     st.session_state.search_started = True
-    st.session_state.awaiting_feedback = True
+    st.session_state.awaiting_feedback = False
     st.session_state.ranked_list = sample_props
     st.session_state.iteration = 1
     st.session_state.converged = False
