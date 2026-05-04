@@ -15,7 +15,7 @@ from backend.state import AgentState
 from backend.tools.arcgis import arcgis_amenity_distances
 
 log = logging.getLogger("agent.enrich")
-MAX_WORKERS = 5   # parallel threads — keeps API rate limits safe
+MAX_WORKERS = 15  # one thread per property — all I/O bound, no CPU contention
 
 
 def _enrich_one(prop: dict, index: int, total: int) -> dict:
