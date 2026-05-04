@@ -1,5 +1,4 @@
 import pathlib
-import sys
 import types
 import streamlit as st
 
@@ -23,14 +22,14 @@ def create_sample_properties(count=9):
             "final_score": 0.9 - idx * 0.05,
             "hard_score": 0.7 + idx * 0.02,
             "soft_score": 0.6 + idx * 0.01,
-            "rationale": f"This property is ranked {idx} because it fits the sample criteria. and the criteria differes based on the user preference profile.",
+            "rationale": f"This property is ranked {idx} because it fits the sample criteria.",
             "images": [],
         })
     return properties
 
 
 def load_app_module():
-    source = APP_PATH.read_text(encoding="utf-8")
+    source = APP_PATH.read_text()
     marker = "_PAGES[st.session_state.page]()"
     marker_index = source.rfind(marker)
     if marker_index == -1:
@@ -41,7 +40,6 @@ def load_app_module():
     module.__file__ = str(APP_PATH)
     module.__package__ = ""
     module.__dict__["__name__"] = "app"
-    sys.modules["app"] = module  # needed so inspect.getmodule() can resolve the frame
     exec(compile(executable_source, str(APP_PATH), "exec"), module.__dict__)
     return module
 

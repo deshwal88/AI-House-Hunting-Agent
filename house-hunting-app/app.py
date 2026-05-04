@@ -40,35 +40,41 @@ _SORTABLE_CSS = """\
 .sortable-container-body {
     display: flex !important;
     flex-wrap: wrap !important;
+    justify-content: center !important;
 }
 
 
 .sortable-item {
-    color: black;
+    color: #5c5959;
     background-color: white;
     cursor: grab;
-    height: 300px;
+    height: 41vh;
     margin: 5px;
-    padding-bottom: 3px;
+    padding-bottom: 10px;
     padding-top: 160px;
-    width: 250px;
+    width: calc(20vw - 20px);
     background-size: contain;
     background-image: url(https://static.vecteezy.com/system/resources/thumbnails/047/022/946/small_2x/modern-two-story-house-with-stone-accents-and-garage-at-dusk-free-photo.jpeg);
     background-repeat: no-repeat;
     border-radius: 6px;
-    overflow: hidden;
+    overflow: clip;
+    white-space: pre-line !important;
+    font-size: 12px;
 }
 .sortable-item:active { cursor: grabbing; opacity: 0.85; }
 .sortable-item:hover { 
+background-image: none;
+color: black;
 opacity: 0.9;
 margin: 0px;
 padding: 0px;
-background-color: gray; 
-width: 250px;
-height: 300px;
-padding: 160px 0 0 0;
+background-color: #c1d4d9 !important; 
+width: calc(20vw - 20px);
+height: 40vh;
+padding: 10px 0 0 0;
 transition: none;
-
+display: flex !important;
+align-items: center !important;
 }
 """
 
@@ -150,6 +156,9 @@ st.markdown("""
 .block-container { max-width: 95vw; padding-top: 2rem; }
 
 /* Welcome hero */
+iframe.stCustomComponentV1{
+    height: 80vh !important;
+}
 .hero { text-align: center; padding: 48px 0 28px; }
 .hero-icon  { font-size: 72px; line-height: 1; }
 .hero-title {
@@ -334,7 +343,7 @@ st.markdown("""
 /* ── Property card grid ───────────────────────────────────────────────── */
 [data-testid="stMarkdownContainer"] { overflow: visible !important; }
 .prop-grid {
-    display: grid; grid-template-columns: 1fr 1fr;
+    display: grid; grid-template-columns: repeat(5, 1fr);
     gap: 14px; padding: 6px; margin-bottom: 16px;
 }
 .prop-card {
@@ -344,7 +353,9 @@ st.markdown("""
     cursor: default;
 }
 .prop-card:hover { transform: scale(1.1); background-color: #f1f5f9; z-index: 10; }
-.prop-img  { width: 100%; height: 160px; object-fit: cover; display: block; border-radius: 9px 9px 0 0; }
+.prop-img  { width: 100%; height: 50%; display: block; border-radius: 9px 9px 0 0; 
+            background-size: cover; background-position: center;
+            }
 .prop-placeholder {
     width: 100%; height: 160px;
     background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
@@ -356,15 +367,15 @@ st.markdown("""
     background: rgba(0,0,0,0.6); color: #fff;
     width: 22px; height: 22px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 700; z-index: 2;
+    font-size: 12px; font-weight: 700; z-index: 2;
 }
-.prop-body  { padding: 7px 10px 9px; font-size: 10px; line-height: 1.45; color: #1e293b; }
+.prop-body  { padding: 7px 10px 9px; font-size: 14px; line-height: 1.45; color: #1e293b; }
 .prop-addr  { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prop-sub   { color: #64748b; margin-bottom: 3px; }
 .prop-meta  { display: flex; justify-content: space-between; align-items: center; }
 .prop-badge { font-size: 9px; font-weight: 700; color: #fff; border-radius: 10px; padding: 2px 7px; }
 .prop-rat   {
-    font-size: 9px; color: #64748b; font-style: italic; margin-top: 3px;
+    font-size: 12px; color: #64748b; font-style: italic; margin-top: 3px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 </style>
@@ -902,7 +913,6 @@ def _render_property_grid(props: list[dict]) -> None:
 
 def _render_feedback_ui(props: list[dict], sid: str) -> None:
     """Sortable feedback UI — cards merged into draggable one-line items."""
-
     # Banner header: default house background, 160 px, cover
     st.markdown("""
     <div style="
@@ -930,13 +940,13 @@ def _render_feedback_ui(props: list[dict], sid: str) -> None:
             pct  = round(p.get("final_score", 0) * 100)
             beds = p.get("bedrooms")
             bath = p.get("bathrooms")
-            bed_bath = f"{beds}bd · {bath}ba" if beds is not None and bath is not None else ""
+            bed_bath = f"{beds} Bed · {bath} Bath" if beds is not None and bath is not None else ""
             label = (
-                f"#{i+1}  {p.get('address','?')}  |  "
-                f"{p.get('city','')}, {p.get('state','')}  |  "
-                f"${p.get('rent', 0):,}/mo"
-                + (f"  |  {bed_bath}" if bed_bath else "")
-                + f"  |  {pct}%"
+                f"{pct}% Match\n" +
+                f"{p.get('address','?')}, {p.get('city','')}\n"
+                + (f"{bed_bath} | " if bed_bath else "")
+                + f"${p.get('rent', 0):,}/mo\n"
+                + f"{p.get('rationale','')}" if p.get("rationale") else ""
             )
             labels.append(label)
             id_map[label] = p["property_id"]
