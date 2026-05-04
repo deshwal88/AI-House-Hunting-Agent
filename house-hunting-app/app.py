@@ -25,7 +25,7 @@ import time
 import uuid
 import requests
 import streamlit as st
-import streamlit.components.v1 as stc
+import streamlit.components.v1 as components
 
 try:
     from streamlit_sortables import sort_items
@@ -112,7 +112,7 @@ def _folder_for_type(property_type: str) -> str:
 def _inject_sortable_css() -> None:
     """Inject custom CSS into the streamlit_sortables iframe via sibling-frame JS."""
     css_js = json.dumps(_SORTABLE_CSS)   # safely escaped for embedding in JS
-    stc.html(
+    components.html(
         f"""<script>
 (function() {{
     var css = {css_js};
